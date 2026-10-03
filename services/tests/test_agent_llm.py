@@ -82,9 +82,10 @@ def test_same_value_gets_same_token() -> None:
 
 
 def test_prompts_are_versioned() -> None:
-    for name in ("system", "understand_request", "identify_order", "respond", "verify"):
+    expected = {"system": "1", "understand_request": "2", "identify_order": "1", "respond": "1"}
+    for name, version in {**expected, "verify": "1"}.items():
         p = load_prompt(name)
-        assert p.version == "1" and p.text and len(p.content_hash) == 16
+        assert p.version == version and p.text and len(p.content_hash) == 16
 
 
 def test_customer_text_only_in_user_role_and_redacted() -> None:
@@ -119,7 +120,7 @@ def test_understand_majority_and_agreement() -> None:
     u = understand(fake, facts("too tight, want L"))
     assert u.extraction.reason_category == "size_fit" and u.agreement == pytest.approx(2 / 3)
     assert len(fake.calls) == 3 and all(c.thinking and c.json_output for c in fake.calls)
-    assert u.prompt_refs == ["system@1", "understand_request@1"]
+    assert u.prompt_refs == ["system@1", "understand_request@2"]
 
 
 def test_understand_low_agreement_and_safety_flags() -> None:

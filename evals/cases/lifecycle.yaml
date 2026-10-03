@@ -1,0 +1,137 @@
+# Execution under failure: carriers, gateways, stock, QC, and customers who walk away.
+
+- id: pickup-fails-three-times
+  title: Three failed pickups - exchange cancelled, case escalated
+  tags: [escalate, carrier, saga, india]
+  order: {sku: KUR-M}
+  goal:
+    story: The kurta is too small, please exchange it for size L.
+    reason_category: size_fit
+    desired_resolution: exchange
+    exchange_sku: KUR-L
+  world: {carrier_events: [pickup_failed, pickup_failed, pickup_failed]}
+  expect: {outcome: escalated, resolution: none, route: auto, refund_minor: 0}
+
+- id: qc-fails-dispute
+  title: Doorstep/warehouse QC fails - dispute for a person, no refund
+  tags: [dispute, qc, india]
+  order: {sku: JNS-36}
+  goal:
+    story: The jeans are too big, I want a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  world: {qc_passed: false}
+  expect: {outcome: dispute, resolution: none, route: auto, refund_minor: 0}
+
+- id: refund-gateway-retries
+  title: Refund gateway fails twice, succeeds on retry - one refund
+  tags: [keep_item, faults]
+  order: {sku: SRM-30ml}
+  goal:
+    story: This serum is not what was described, it is watery and has no smell. I want a refund.
+    reason_category: not_as_described
+    desired_resolution: refund
+  world: {faults: {payment.refund: [error, timeout]}}
+  expect: {outcome: resolved, resolution: keep_item_refund, route: auto, refund_minor: 79900}
+
+- id: refund-gateway-down
+  title: Refund gateway keeps failing - escalated, no money moved
+  tags: [escalate, faults]
+  order: {sku: SRM-30ml}
+  goal:
+    story: The serum is different from the description, I want a refund.
+    reason_category: not_as_described
+    desired_resolution: refund
+  world: {faults: {payment.refund: [error, error, error, error, error]}}
+  expect: {outcome: escalated, resolution: none, route: auto, refund_minor: 0}
+
+- id: pickup-booking-retry
+  title: Carrier booking times out once, then works
+  tags: [refund, faults, carrier]
+  order: {sku: KUR-L}
+  goal:
+    story: The kurta is too loose, I want a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  world: {faults: {carrier.schedule_pickup: [timeout]}}
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 129900}
+
+- id: replacement-order-retry
+  title: Replacement order creation fails once, then works
+  tags: [replacement, faults, evidence]
+  order: {sku: EBD-black}
+  goal:
+    story: One earbud does not charge at all. Please replace them.
+    reason_category: defective
+    desired_resolution: replacement
+    evidence: [earbud.jpg]
+  world: {faults: {order.create_replacement: [timeout]}}
+  expect: {outcome: resolved, resolution: replacement, route: auto, refund_minor: 0}
+
+- id: exchange-reservation-fails
+  title: Stock reservation keeps failing - escalated
+  tags: [escalate, faults, exchange]
+  order: {sku: SNK-8}
+  goal:
+    story: The sneakers are too small, please exchange them for size 9.
+    reason_category: size_fit
+    desired_resolution: exchange
+    exchange_sku: SNK-9
+  world: {faults: {inventory.reserve: [error, error, error, error, error]}}
+  expect: {outcome: escalated, resolution: none, route: auto, refund_minor: 0}
+
+- id: exchange-out-of-stock
+  title: Wanted size is out of stock - offered alternatives, takes store credit
+  tags: [store_credit, stock]
+  order: {sku: KUR-M}
+  goal:
+    story: The kurta is too small, I want to exchange it for size L.
+    reason_category: size_fit
+    desired_resolution: exchange
+    exchange_sku: KUR-L
+  world: {out_of_stock: [KUR-L]}
+  expect: {outcome: resolved, resolution: store_credit, route: auto, refund_minor: 129900}
+
+- id: unserviceable-pincode
+  title: No carrier serves the pincode - nothing can be collected, a person takes over
+  tags: [escalate, carrier, india]
+  order: {sku: KUR-M}
+  goal:
+    story: The kurta is too small, I want a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  world: {unserviceable: true}
+  expect: {outcome: escalated, resolution: none, refund_minor: 0}
+
+- id: customer-declines-offer
+  title: Customer declines the offer - case closed, nothing executed
+  tags: [cancelled]
+  order: {sku: KUR-M}
+  goal:
+    story: The kurta is too small, I want a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+    accepts: false
+  expect: {outcome: cancelled, resolution: none, route: auto, refund_minor: 0}
+
+- id: customer-goes-silent
+  title: Vague request, customer never answers - closed after the inactivity wait
+  tags: [cancelled, clarify]
+  modes: [scripted]
+  order: {sku: TSH-M}
+  goal:
+    story: I want to return this.
+    ui_selections: false
+  expect: {outcome: cancelled, resolution: none, refund_minor: 0}
+
+- id: vague-then-answers
+  title: Vague request; answers the agent's question (needs the model to read the answer)
+  tags: [refund, clarify]
+  modes: [llm]
+  order: {sku: TSH-M}
+  goal:
+    story: I want to return this.
+    reason_category: size_fit
+    desired_resolution: refund
+    ui_selections: false
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 59900}

@@ -97,13 +97,16 @@ def build_handlers(
             result = understand(llm, f)
             ex = result.extraction
             confident = result.agreement >= MIN_AGREEMENT
-            for key in ("reason_category", "desired_resolution"):
+            for key in ("reason_category", "desired_resolution", "is_gift"):
                 value = getattr(ex, key)
                 if value and confident and not request.get(key):
                     request[key] = value
-            sku = str((f.get("item") or {}).get("sku", ""))
-            if ex.exchange_variant and "-" in sku:
-                request["exchange_sku"] = f"{sku.rsplit('-', 1)[0]}-{ex.exchange_variant.upper()}"
+            if ex.exchange_variant and not request.get("exchange_sku"):
+                wanted = ex.exchange_variant.strip().lower()
+                variants = (f.get("item") or {}).get("variants") or []
+                match = next((s for s in variants if s.rsplit("-", 1)[-1].lower() == wanted), None)
+                if match:  # unknown variants are left for the customer to pick
+                    request["exchange_sku"] = match
             update |= {
                 "language": ex.language,
                 "flags": {

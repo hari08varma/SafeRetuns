@@ -1,0 +1,102 @@
+# Refund amounts: coupon pro-ration, partial and repeated returns, COD and gifts.
+# Line paid = unit x qty - coupon share; partial returns use the cumulative-floor split.
+
+- id: coupon-prorated
+  title: Coupon share deducted from the refund
+  tags: [refund, coupon]
+  order: {sku: JNS-30, discount_minor: 20000}
+  goal:
+    story: The jeans are too long for me, I want a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 169900}  # 189900 - 20000
+
+- id: partial-one-of-three
+  title: Returns 1 of 3 t-shirts bought with a coupon
+  tags: [refund, partial, coupon]
+  order: {sku: TSH-M, qty: 3, discount_minor: 30000}
+  goal:
+    story: I bought three of these t-shirts. One has a print that doesn't match the photos, I want to return that one for a refund.
+    reason_category: not_as_described
+    desired_resolution: refund
+    qty_returning: 1
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 49900}  # (179700 - 30000) / 3
+
+- id: partial-two-of-three
+  title: Returns 2 of 3 (rounding down in the customer's disfavour is not allowed to exceed paid)
+  tags: [refund, partial, coupon]
+  order: {sku: TSH-L, qty: 3, discount_minor: 10000}
+  goal:
+    story: Two of the three t-shirts I bought are too tight. I want to return those two for a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+    qty_returning: 2
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 113133}  # 169700 x 2 // 3
+
+- id: partial-second-return
+  title: Second partial return of the same line - totals stay exact
+  tags: [refund, partial, coupon]
+  order: {sku: TSH-S, qty: 3, discount_minor: 10000}
+  goal:
+    story: One of the t-shirts from my order is too small. I'd like a refund for it.
+    reason_category: size_fit
+    desired_resolution: refund
+    qty_returning: 1
+  world: {repeat: 2}
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 56567}  # 113133 - 56566
+
+- id: cod-refund-upi
+  title: Cash on delivery, refund to UPI
+  tags: [refund, cod, india]
+  order: {sku: KUR-M, payment_method: cod}
+  goal:
+    story: The kurta is too small. I paid cash on delivery; please refund me to my UPI.
+    reason_category: size_fit
+    desired_resolution: refund
+    refund_method: upi
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 129900, clauses: [RET-COD-01]}
+
+- id: cod-refund-default
+  title: Cash on delivery, no refund method chosen - store credit (cash cannot go back)
+  tags: [refund, cod, india]
+  order: {sku: KUR-S, payment_method: cod}
+  goal:
+    story: The kurta is too small for me, I'd like my money back. I paid in cash.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 129900, clauses: [RET-COD-01]}
+
+- id: cod-defective-bank-transfer
+  title: Cash on delivery, defective, refund by bank transfer
+  tags: [refund, cod, evidence, india]
+  order: {sku: SNK-7, payment_method: cod}
+  goal:
+    story: The sole of one sneaker is coming off already. I paid cash, please refund to my bank account.
+    reason_category: defective
+    desired_resolution: refund
+    refund_method: bank_transfer
+    evidence: [sole.jpg]
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 349900}
+
+- id: gift-exchange
+  title: Gift recipient exchanges for another size
+  tags: [exchange, gift]
+  order: {sku: KUR-M}
+  goal:
+    story: I received this kurta as a gift but it is too small. Can I exchange it for size L?
+    reason_category: size_fit
+    desired_resolution: exchange
+    exchange_sku: KUR-L
+    is_gift: true
+  expect: {outcome: resolved, resolution: exchange, route: auto, refund_minor: 0, clauses: [RET-GIFT-01]}
+
+- id: gift-wants-refund
+  title: Gift recipient asks for a refund - gets store credit (refund goes to the buyer otherwise)
+  tags: [store_credit, gift]
+  order: {sku: TSH-M}
+  goal:
+    story: Someone gifted me this t-shirt and I don't like it. I'd like a refund.
+    reason_category: changed_mind
+    desired_resolution: refund
+    is_gift: true
+  expect: {outcome: resolved, resolution: store_credit, route: auto, refund_minor: 59900, clauses: [RET-GIFT-01]}

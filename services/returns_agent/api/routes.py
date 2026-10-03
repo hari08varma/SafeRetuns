@@ -269,6 +269,8 @@ class OpenCase(BaseModel):
         | None
     ) = None
     desired_resolution: Literal["refund", "exchange", "replacement", "store_credit"] | None = None
+    exchange_sku: str | None = Field(default=None, max_length=64)  # size/colour picked for exchange
+    is_gift: bool | None = None
 
 
 class CustomerText(BaseModel):
@@ -307,6 +309,8 @@ def open_case(principal: CustomerOnly, body: OpenCase, db: DB, cases: Cases) -> 
             {
                 "reason_category": body.reason_category,
                 "desired_resolution": body.desired_resolution,
+                "exchange_sku": body.exchange_sku,
+                "is_gift": body.is_gift,
             },
         )
     )

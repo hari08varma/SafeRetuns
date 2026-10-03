@@ -1,0 +1,174 @@
+# Happy paths: every resolution type, payment method and evidence path.
+# Amounts are paise and worked out by hand from the policy, not from the code.
+
+- id: refund-size-upi
+  title: Size problem, prepaid UPI, wants a refund
+  tags: [refund, prepaid]
+  order: {sku: KUR-M}
+  goal:
+    story: The kurta is too tight on the shoulders. I'd like to return it and get my money back.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect:
+    outcome: resolved
+    resolution: refund
+    route: auto
+    refund_minor: 129900
+    clauses: [RET-DELIVERED-01, RET-WINDOW-01, RET-REFUND-PREPAID-01]
+
+- id: refund-size-card
+  title: Size problem, paid by card
+  tags: [refund, prepaid]
+  order: {sku: JNS-34, payment_method: card}
+  goal:
+    story: These jeans are too loose at the waist, I want to return them for a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 189900}
+
+- id: refund-not-as-described-wallet
+  title: Not as described, wallet payment, refund with pickup (apparel is worth collecting)
+  tags: [refund, prepaid]
+  order: {sku: TSH-L, payment_method: wallet}
+  goal:
+    story: The t-shirt print looks completely different from the photos on the website. I want a refund.
+    reason_category: not_as_described
+    desired_resolution: refund
+  expect:
+    outcome: resolved
+    resolution: refund
+    route: auto
+    refund_minor: 59900
+    clauses: [LEGAL-IN-DEFECT-01]
+
+- id: exchange-size-kurta
+  title: Exchange for a bigger size
+  tags: [exchange]
+  order: {sku: KUR-M}
+  goal:
+    story: The kurta is a bit small for me. Can I exchange it for size L?
+    reason_category: size_fit
+    desired_resolution: exchange
+    exchange_sku: KUR-L
+  expect: {outcome: resolved, resolution: exchange, route: auto, refund_minor: 0}
+
+- id: exchange-size-sneakers
+  title: Exchange sneakers for the next size
+  tags: [exchange]
+  order: {sku: SNK-8}
+  goal:
+    story: The running shoes pinch my toes. Please exchange them for size 9.
+    reason_category: size_fit
+    desired_resolution: exchange
+    exchange_sku: SNK-9
+  expect: {outcome: resolved, resolution: exchange, route: auto, refund_minor: 0}
+
+- id: exchange-colour-earbuds
+  title: Exchange earbuds for another colour
+  tags: [exchange]
+  order: {sku: EBD-black}
+  goal:
+    story: I ordered the black earbuds but I really prefer white. Can I swap them for the white ones?
+    reason_category: changed_mind
+    desired_resolution: exchange
+    exchange_sku: EBD-white
+  expect: {outcome: resolved, resolution: exchange, route: auto, refund_minor: 0}
+
+- id: replacement-damaged-earbuds
+  title: Damaged on arrival, photo provided, wants a replacement
+  tags: [replacement, evidence]
+  order: {sku: EBD-white}
+  goal:
+    story: The earbuds case arrived cracked and the lid does not close. I want a replacement.
+    reason_category: damaged
+    desired_resolution: replacement
+    evidence: [cracked-case.jpg]
+  expect:
+    outcome: resolved
+    resolution: replacement
+    route: auto
+    refund_minor: 0
+    clauses: [LEGAL-IN-DEFECT-01, RET-EVIDENCE-01]
+
+- id: replacement-wrong-item-jeans
+  title: Wrong item delivered
+  tags: [replacement, evidence]
+  order: {sku: JNS-32}
+  goal:
+    story: I ordered slim fit jeans in size 32 but received a completely different pair of trousers. Please send the right one.
+    reason_category: wrong_item
+    desired_resolution: replacement
+    evidence: [wrong-item.jpg]
+  expect: {outcome: resolved, resolution: replacement, route: auto, refund_minor: 0}
+
+- id: refund-defective-sandals
+  title: Defective, photo provided, wants a refund
+  tags: [refund, evidence]
+  order: {sku: SND-8}
+  goal:
+    story: The strap of the sandals came off after one day of wearing them. I want my money back.
+    reason_category: defective
+    desired_resolution: refund
+    evidence: [strap.jpg]
+  expect:
+    outcome: resolved
+    resolution: refund
+    route: auto
+    refund_minor: 149900
+    clauses: [LEGAL-IN-DEFECT-01, RET-EVIDENCE-01]
+
+- id: keep-item-serum
+  title: Cheap opened cosmetic - refund without return is cheaper than collecting it
+  tags: [keep_item, refund]
+  order: {sku: SRM-30ml}
+  goal:
+    story: The serum smells nothing like the description and gave me a rash. I want a refund.
+    reason_category: not_as_described
+    desired_resolution: refund
+  expect: {outcome: resolved, resolution: keep_item_refund, route: auto, refund_minor: 79900}
+
+- id: store-credit-changed-mind
+  title: Change of mind, wants store credit
+  tags: [store_credit]
+  order: {sku: TSH-M}
+  goal:
+    story: I changed my mind about this t-shirt. Store credit is fine for me.
+    reason_category: changed_mind
+    desired_resolution: store_credit
+  expect:
+    outcome: resolved
+    resolution: store_credit
+    route: auto
+    refund_minor: 59900
+    clauses: [RET-CHANGEDMIND-01]
+
+- id: last-day-of-window
+  title: Return started on day 30 of a 30-day window
+  tags: [refund, window]
+  order: {sku: KUR-S, delivered_days_ago: 30}
+  goal:
+    story: The kurta does not fit me, I would like a refund please.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 129900, clauses: [RET-WINDOW-01]}
+
+- id: same-day-return
+  title: Return started on the delivery day (risk signal, still low)
+  tags: [refund, risk]
+  order: {sku: KUR-XL, delivered_days_ago: 0}
+  goal:
+    story: Got the kurta today and it is far too big. Please refund me.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 129900}
+
+- id: replacement-not-allowed-for-size
+  title: Asks for a replacement for a size issue - policy offers exchange instead
+  tags: [exchange, policy]
+  order: {sku: KUR-M}
+  goal:
+    story: The kurta is too small. Send me a replacement in size L.
+    reason_category: size_fit
+    desired_resolution: replacement
+    exchange_sku: KUR-L
+  expect: {outcome: resolved, resolution: exchange, route: auto, refund_minor: 0, clauses: [RET-REPLACE-01]}

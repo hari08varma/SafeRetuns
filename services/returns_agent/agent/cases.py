@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from returns_agent.agent.context import redactor_for
@@ -15,16 +15,22 @@ from returns_agent.audit import log as audit
 from returns_agent.db.models import (
     Address,
     Customer,
+    Exchange,
     Message,
     Order,
     OrderItem,
     Product,
+    Refund,
+    ReplacementOrder,
     ReturnCase,
+    ReturnItem,
 )
 from returns_agent.graph.runner import CaseRunner, Event, RunResult
 from returns_agent.lifecycle import timers
 from returns_agent.llm.client import LLMClient
 from returns_agent.security.pii import decrypt
+
+DEAD = ("failed", "cancelled")  # execution rows that did not result in a return
 
 
 class CaseNotFound(Exception):
@@ -75,6 +81,27 @@ def customer_stats(
     }
 
 
+def returned_qty(
+    session: Session, order_item_id: uuid.UUID, exclude_case: uuid.UUID | None = None
+) -> int:
+    """Units of this order line already returned, or in a return that is still open."""
+    executed = or_(
+        *(
+            exists(select(t.id).where(t.case_id == ReturnCase.id, t.status.not_in(DEAD)))
+            for t in (Refund, Exchange, ReplacementOrder)
+        )
+    )
+    query = (
+        select(func.coalesce(func.sum(ReturnItem.qty), 0))
+        .join(ReturnCase, ReturnCase.id == ReturnItem.case_id)
+        .where(ReturnItem.order_item_id == order_item_id)
+        .where(or_(ReturnCase.status != "closed", executed))
+    )
+    if exclude_case is not None:
+        query = query.where(ReturnCase.id != exclude_case)
+    return int(session.scalar(query) or 0)
+
+
 def build_case_facts(
     session: Session,
     customer: Customer,
@@ -85,8 +112,12 @@ def build_case_facts(
     case_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     product = session.scalars(select(Product).where(Product.sku == item.sku)).one()
+    family = item.sku.rsplit("-", 1)[0]
+    variants = session.scalars(
+        select(Product.sku).where(Product.sku.startswith(f"{family}-")).order_by(Product.sku)
+    ).all()
     address = session.scalars(select(Address).where(Address.customer_id == customer.id)).first()
-    already = 0  # earlier returns of this line: counted from closed cases in Phase 6
+    already = returned_qty(session, item.id, exclude_case=case_id)
     return {
         "customer_id": str(customer.id),
         "pincode": address.pincode if address else None,
@@ -104,6 +135,7 @@ def build_case_facts(
             "sku": item.sku,
             "category": product.category,
             "final_sale": item.final_sale,
+            "variants": list(variants),  # SKUs this item can be exchanged for
             "qty_ordered": item.qty,
             "qty_returning": qty,
             "qty_already_returned": already,
@@ -150,6 +182,14 @@ class CaseService:
         facts = build_case_facts(session, customer, order, item, qty, message, case.id)
         facts["principal_customer_id"] = str(customer_id)
         facts["request"] = {k: v for k, v in (request or {}).items() if v}  # UI selections
+        session.add(
+            ReturnItem(
+                case_id=case.id,
+                order_item_id=item.id,
+                qty=qty,
+                reason_category=facts["request"].get("reason_category"),
+            )
+        )
         self._store(session, case.id, "customer", message, facts)
         session.commit()
         result = self.runner.start(case.id, facts)
@@ -187,6 +227,16 @@ class CaseService:
                 payload[key] = value
         result = self.runner.dispatch(
             case_id, Event("customer_confirm", payload, "customer", str(customer_id))
+        )
+        return self._respond(session, result)
+
+    def upload(
+        self, session: Session, customer_id: uuid.UUID, case_id: uuid.UUID, files: list[str]
+    ) -> CaseView:
+        """Evidence uploaded by the customer (file references; storage arrives in Phase 8)."""
+        self._owned(session, customer_id, case_id)
+        result = self.runner.dispatch(
+            case_id, Event("customer_upload", {"files": files}, "customer", str(customer_id))
         )
         return self._respond(session, result)
 

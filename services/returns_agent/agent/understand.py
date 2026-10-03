@@ -35,6 +35,7 @@ class Extraction(BaseModel):
     ) = None
     desired_resolution: Literal["refund", "exchange", "replacement", "store_credit"] | None = None
     exchange_variant: str | None = None
+    is_gift: bool = False
     language: str = "en"
     sentiment: Literal["calm", "frustrated", "angry"] = "calm"
     wants_human: bool = False

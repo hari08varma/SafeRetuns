@@ -149,7 +149,7 @@ def test_open_case_with_llm_then_confirm(
     case_id = view["case_id"]
     events = seeded_db.scalars(select(AuditEvent).where(AuditEvent.chain_key == case_id)).all()
     understand_node = next(e for e in events if e.payload.get("node") == "UNDERSTAND_REQUEST")
-    assert understand_node.payload["llm"]["prompt_refs"] == ["system@1", "understand_request@1"]
+    assert understand_node.payload["llm"]["prompt_refs"] == ["system@1", "understand_request@2"]
     sent_events = [e for e in events if e.action == "message.sent"]
     assert sent_events and sent_events[0].payload["used_template"] is False
     case = seeded_db.get(ReturnCase, sent_events[0].case_id)

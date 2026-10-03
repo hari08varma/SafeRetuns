@@ -1,0 +1,125 @@
+# Returns the policy must refuse (with the clause cited), and legal overrides that must win.
+
+- id: outside-window
+  title: Day 31 - outside the 30-day window
+  tags: [rejected, window]
+  order: {sku: KUR-M, delivered_days_ago: 31}
+  goal:
+    story: The kurta doesn't fit, I want to return it for a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: rejected, resolution: none, refund_minor: 0, failed_clauses: [RET-WINDOW-01]}
+
+- id: outside-window-defective
+  title: Defective but long after the window - legal protection cannot extend the window
+  tags: [rejected, window, legal]
+  order: {sku: SND-8, delivered_days_ago: 45}
+  goal:
+    story: The sandal strap broke today. I want a refund.
+    reason_category: defective
+    desired_resolution: refund
+    evidence: [strap.jpg]
+  expect: {outcome: rejected, resolution: none, refund_minor: 0, failed_clauses: [RET-WINDOW-01]}
+
+- id: innerwear-changed-mind
+  title: Innerwear, change of mind - non-returnable category
+  tags: [rejected, non_returnable]
+  order: {sku: INR-M}
+  goal:
+    story: I don't need this innerwear pack anymore, please take it back and refund me.
+    reason_category: changed_mind
+    desired_resolution: refund
+  expect: {outcome: rejected, resolution: none, refund_minor: 0, failed_clauses: [RET-NONRET-01]}
+
+- id: innerwear-defective-legal
+  title: Defective innerwear - legal protection overrides the category rule
+  tags: [refund, legal, evidence]
+  order: {sku: INR-L}
+  goal:
+    story: The elastic in the innerwear pack is torn and the stitching has come apart. I want a refund.
+    reason_category: defective
+    desired_resolution: refund
+    evidence: [torn.jpg]
+  expect:
+    outcome: resolved
+    resolution: refund
+    route: auto
+    refund_minor: 69900
+    clauses: [LEGAL-IN-DEFECT-01]
+
+- id: perishable-changed-mind
+  title: Mangoes, change of mind - perishable
+  tags: [rejected, non_returnable]
+  order: {sku: MNG-1kg}
+  goal:
+    story: I ordered mangoes by mistake, please take them back.
+    reason_category: changed_mind
+    desired_resolution: refund
+  expect: {outcome: rejected, resolution: none, refund_minor: 0, failed_clauses: [RET-NONRET-01]}
+
+- id: perishable-damaged-legal
+  title: Mangoes arrived rotten - legal protection, replacement
+  tags: [replacement, legal, evidence]
+  order: {sku: MNG-1kg}
+  goal:
+    story: Half the mangoes arrived rotten and squashed. Please send a fresh box.
+    reason_category: damaged
+    desired_resolution: replacement
+    evidence: [rotten.jpg]
+  expect: {outcome: resolved, resolution: replacement, route: auto, refund_minor: 0, clauses: [LEGAL-IN-DEFECT-01]}
+
+- id: personalised-mug-changed-mind
+  title: Personalised mug, change of mind
+  tags: [rejected, non_returnable]
+  order: {sku: MUG-11oz}
+  goal:
+    story: I don't like the personalised mug after all, can I return it?
+    reason_category: changed_mind
+    desired_resolution: refund
+  expect: {outcome: rejected, resolution: none, refund_minor: 0, failed_clauses: [RET-NONRET-01]}
+
+- id: final-sale-size
+  title: Final-sale item with a size problem
+  tags: [rejected, final_sale]
+  order: {sku: KUR-L, final_sale: true}
+  goal:
+    story: The sale kurta is too big, I'd like to return it for a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: rejected, resolution: none, refund_minor: 0, failed_clauses: [RET-FINALSALE-01]}
+
+- id: final-sale-defective-legal
+  title: Final-sale item that is defective - legal protection wins
+  tags: [refund, final_sale, legal, evidence]
+  order: {sku: KUR-L, final_sale: true}
+  goal:
+    story: The sale kurta has a big tear along the seam, it came like this. I want a refund.
+    reason_category: defective
+    desired_resolution: refund
+    evidence: [tear.jpg]
+  expect:
+    outcome: resolved
+    resolution: refund
+    route: auto
+    refund_minor: 129900
+    clauses: [LEGAL-IN-DEFECT-01]
+
+- id: order-in-transit
+  title: Order not delivered yet
+  tags: [rejected, not_delivered]
+  order: {sku: KUR-M, status: in_transit, delivered_days_ago: null}
+  goal:
+    story: I want to return my kurta order, I don't want it anymore.
+    reason_category: changed_mind
+    desired_resolution: refund
+  expect: {outcome: rejected, resolution: none, refund_minor: 0, failed_clauses: [RET-DELIVERED-01]}
+
+- id: order-rto
+  title: Order returned to origin (RTO) - never delivered
+  tags: [rejected, not_delivered, india]
+  order: {sku: SNK-9, status: rto, delivered_days_ago: null}
+  goal:
+    story: I want to return the sneakers for a refund.
+    reason_category: changed_mind
+    desired_resolution: refund
+  expect: {outcome: rejected, resolution: none, refund_minor: 0, failed_clauses: [RET-DELIVERED-01]}

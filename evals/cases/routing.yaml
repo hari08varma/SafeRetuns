@@ -1,0 +1,76 @@
+# Autonomy: risk x value x confidence decides auto / approval / escalate.
+
+- id: high-value-phone-defective
+  title: Defective smartphone - high value needs approval
+  tags: [approval, high_value, evidence]
+  order: {sku: PHN-blue}
+  goal:
+    story: My new phone's screen flickers constantly and it restarts by itself. I want a replacement.
+    reason_category: defective
+    desired_resolution: replacement
+    evidence: [screen.mp4]
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}
+
+- id: smartwatch-refund-approval
+  title: Smartwatch above the auto-approval value limit
+  tags: [approval, high_value]
+  order: {sku: SWT-black}
+  goal:
+    story: The smartwatch looks nothing like the pictures, the strap and dial are different. I want a refund.
+    reason_category: not_as_described
+    desired_resolution: refund
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}
+
+- id: serial-returner
+  title: Six returns in 90 days - escalated to a person
+  tags: [escalate, risk]
+  customer: {prior_returns_90d: 6, prior_orders_90d: 6}
+  order: {sku: KUR-M}
+  goal:
+    story: This kurta doesn't fit, I want a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: escalated, resolution: none, route: escalate, refund_minor: 0}
+
+- id: high-return-ratio
+  title: Returns two of three recent orders - approval
+  tags: [approval, risk]
+  customer: {prior_returns_90d: 2, prior_orders_90d: 2}
+  order: {sku: TSH-M}
+  goal:
+    story: The t-shirt is too tight, I'd like a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}
+
+- id: new-account-same-day
+  title: New account returning on the delivery day - approval
+  tags: [approval, risk]
+  customer: {account_age_days: 10}
+  order: {sku: KUR-M, delivered_days_ago: 0}
+  goal:
+    story: I got the kurta today and it is too short. Refund please.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}
+
+- id: new-account-low-risk
+  title: New account alone is not enough to stop an automatic refund
+  tags: [refund, risk]
+  customer: {account_age_days: 10}
+  order: {sku: TSH-S}
+  goal:
+    story: The t-shirt is too small, I want a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 59900}
+
+- id: damaged-no-photo
+  title: Claims damage but never uploads a photo - closed after the wait
+  tags: [cancelled, evidence]
+  order: {sku: EBD-white}
+  goal:
+    story: The earbuds arrived damaged. I want a replacement.
+    reason_category: damaged
+    desired_resolution: replacement
+  expect: {outcome: cancelled, resolution: none, refund_minor: 0}

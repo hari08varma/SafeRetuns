@@ -202,6 +202,16 @@ class CaseRunner:
             violations=violations[previous_violations:],
         )
 
+    def facts(self, case_id: uuid.UUID) -> dict[str, Any]:
+        """The case's current facts from its checkpoint (read-only)."""
+        with self._sessions() as session:
+            case = session.get(ReturnCase, case_id)
+            if case is None:
+                raise KeyError(case_id)
+            version = case.graph_version
+        snapshot = self.registry.graph(version).get_state(self._config(case_id))
+        return dict(snapshot.values.get("facts", {}))
+
     def reconcile(self, case_id: uuid.UUID) -> bool:
         """Re-queue the action for a case waiting at an execution node (idempotent). Covers a
         crash between the checkpoint save and the outbox commit."""
