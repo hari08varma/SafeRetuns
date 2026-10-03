@@ -145,6 +145,14 @@ def test_deepseek_does_not_retry_on_400(monkeypatch: pytest.MonkeyPatch) -> None
     assert len(calls) == 1
 
 
-def test_deepseek_requires_api_key() -> None:
-    with pytest.raises(ValueError):
-        DeepSeekProvider(api_key="", model="m")
+def test_deepseek_without_key_sends_no_authorization_header() -> None:
+    """A proxy in front of the API may inject the credential instead."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    provider = DeepSeekProvider(api_key="", model="m", transport=httpx.MockTransport(handler))
+    assert provider.complete(REQ).text == "ok"
+    assert "authorization" not in seen[0].headers

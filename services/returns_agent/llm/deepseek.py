@@ -28,14 +28,14 @@ class DeepSeekProvider:
         max_retries: int = 2,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        if not api_key:
-            raise ValueError("DEEPSEEK_API_KEY is required for the DeepSeek provider")
+        # An empty key is allowed: some deployments route calls through an egress proxy
+        # that adds the credential, so no Authorization header is sent from here.
         self._model = model
         self._max_retries = max_retries
         self._http = httpx.Client(
             base_url=base_url,
             timeout=timeout_s,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             transport=transport,
         )
 
