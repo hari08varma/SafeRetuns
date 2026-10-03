@@ -33,7 +33,21 @@ def refund_destination(facts: dict[str, Any]) -> str:
     return "store_credit" if cod else "source"  # cash cannot go back to its source
 
 
+VALUE_RELEASING = frozenset({"refund", "create_exchange", "create_replacement"})
+
+
 def build_action(node: str, facts: dict[str, Any], case_id: uuid.UUID) -> Intent | None:
+    intent = _build_action(node, facts, case_id)
+    if intent is not None and intent.action in VALUE_RELEASING and facts.get("route") == "approval":
+        # Approved cases carry the single-use approval token; the relay consumes it.
+        token = (facts.get("approval") or {}).get("token")
+        intent = Intent(
+            intent.action, intent.idempotency_key, {**intent.payload, "approval_token": token}
+        )
+    return intent
+
+
+def _build_action(node: str, facts: dict[str, Any], case_id: uuid.UUID) -> Intent | None:
     item = facts.get("item") or {}
     order = facts.get("order") or {}
     item_ref = str(item.get("item_id") or item.get("sku"))

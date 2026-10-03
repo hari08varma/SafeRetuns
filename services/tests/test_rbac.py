@@ -38,6 +38,22 @@ EXPECTED: dict[tuple[str, str], set[Role]] = {
     ("GET", "/api/v1/console/cases/{case_id}/timeline"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
     ("POST", "/api/v1/console/cases/{case_id}/qc"): {Role.QC_OPERATOR, Role.ADMIN},
     ("POST", "/api/v1/cases/{case_id}/evidence"): {Role.CUSTOMER},
+    ("POST", "/api/v1/cases/{case_id}/review"): {Role.CUSTOMER},
+    ("GET", "/api/v1/console/queues/{queue}"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
+    ("POST", "/api/v1/console/queue-items/{item_id}/claim"): {
+        Role.AGENT,
+        Role.APPROVER,
+        Role.ADMIN,
+    },
+    ("POST", "/api/v1/console/queue-items/{item_id}/close"): {
+        Role.AGENT,
+        Role.APPROVER,
+        Role.ADMIN,
+    },
+    ("GET", "/api/v1/console/cases/{case_id}/handoff"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
+    ("POST", "/api/v1/console/cases/{case_id}/approval"): {Role.APPROVER, Role.ADMIN},
+    ("POST", "/api/v1/console/cases/{case_id}/resolve"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
+    ("POST", "/api/v1/console/cases/{case_id}/goodwill"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
 }
 
 BODIES = {
@@ -46,6 +62,23 @@ BODIES = {
     ("POST", "/api/v1/cases/{case_id}/messages"): {"text": "hi"},
     ("POST", "/api/v1/cases/{case_id}/confirm"): {"accept": True},
     ("POST", "/api/v1/console/cases/{case_id}/qc"): {"passed": True},
+    ("POST", "/api/v1/cases/{case_id}/review"): {"reason": "please check"},
+    ("POST", "/api/v1/console/queue-items/{item_id}/close"): {
+        "outcome": "upheld",
+        "reason_code": "policy_upheld",
+    },
+    ("POST", "/api/v1/console/cases/{case_id}/approval"): {
+        "decision": "approve",
+        "reason_code": "policy_compliant",
+    },
+    ("POST", "/api/v1/console/cases/{case_id}/resolve"): {
+        "outcome": "cancelled",
+        "reason_code": "customer_withdrew",
+    },
+    ("POST", "/api/v1/console/cases/{case_id}/goodwill"): {
+        "amount_minor": 1000,
+        "reason_code": "delay_apology",
+    },
 }
 
 
@@ -76,12 +109,18 @@ def test_role_matrix(
 ) -> None:
     from sqlalchemy import select
 
-    from returns_agent.db.models import Customer
+    from returns_agent.db.models import Customer, StaffUser
     from returns_agent.db.session import get_engine
 
     with get_engine().connect() as conn:
         customer_id = conn.execute(select(Customer.id).limit(1)).scalar_one()
-    token = issue_token(Principal(str(customer_id), role), "access")
+    subject = customer_id
+    if role != Role.CUSTOMER:  # staff routes look up the real staff account
+        with get_engine().connect() as conn:
+            subject = conn.execute(
+                select(StaffUser.id).where(StaffUser.role == role.value).limit(1)
+            ).scalar_one()
+    token = issue_token(Principal(str(subject), role), "access")
     body = BODIES.get((method, path))
     if path == "/api/v1/admin/users" and method == "POST":
         body = {
@@ -89,7 +128,11 @@ def test_role_matrix(
             "password": "a-long-password-1",
             "role": "agent",
         }
-    url = path.replace("{case_id}", str(uuid.uuid4()))
+    url = (
+        path.replace("{case_id}", str(uuid.uuid4()))
+        .replace("{item_id}", str(uuid.uuid4()))
+        .replace("{queue}", "approval")
+    )
     resp = client.request(method, url, json=body, headers={"Authorization": f"Bearer {token}"})
     if role in EXPECTED[(method, path)]:
         # Authorised: anything but an auth failure (case endpoints may 404/503 here).

@@ -242,6 +242,42 @@ class Approval(Entity):
     reason_code: Mapped[str | None] = mapped_column(String(64))
     token_hash: Mapped[str | None] = mapped_column(String(64))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    amount_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    required_approvals: Mapped[int] = mapped_column(default=1, server_default="1")
+    # [{staff_id, role, decision, reason_code, option, note, at}] — one entry per sign-off
+    signoffs: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class QueueItem(Entity):
+    """Work for people: approvals, escalations, fraud reviews, disputes, denial reviews."""
+
+    __tablename__ = "queue_item"
+    __table_args__ = (Index("ix_queue_item_open", "queue", "status", "priority", "due_at"),)
+    case_id: Mapped[uuid.UUID] = fk("return_case.id")
+    queue: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open | assigned | done
+    priority: Mapped[int] = mapped_column(default=0)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    assignee_id: Mapped[uuid.UUID | None] = fk("staff_user.id", nullable=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[str | None] = mapped_column(String(32))
+
+
+class Goodwill(Entity):
+    """A case-only gesture (store credit) granted by staff within their authority.
+    It never changes policy and never counts as a refund."""
+
+    __tablename__ = "goodwill"
+    case_id: Mapped[uuid.UUID] = fk("return_case.id")
+    amount_minor: Mapped[int] = mapped_column(BigInteger)
+    reason_code: Mapped[str] = mapped_column(String(64))
+    note: Mapped[str] = mapped_column(Text, default="")
+    granted_by: Mapped[uuid.UUID] = fk("staff_user.id")
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    gateway_ref: Mapped[str | None] = mapped_column(String(64))
 
 
 # --- Execution & lifecycle ----------------------------------------------------------------

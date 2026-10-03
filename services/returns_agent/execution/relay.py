@@ -24,6 +24,7 @@ from returns_agent.audit import log as audit
 from returns_agent.db.models import (
     Customer,
     Exchange,
+    Goodwill,
     Notification,
     Outbox,
     Refund,
@@ -31,8 +32,10 @@ from returns_agent.db.models import (
     ReturnCase,
     Shipment,
 )
-from returns_agent.execution.actions import RESUMING_ACTIONS
+from returns_agent.execution.actions import RESUMING_ACTIONS, VALUE_RELEASING
 from returns_agent.graph.runner import CaseClosed, CaseRunner, Event, StaleEvent
+from returns_agent.hitl.approvals import TokenInvalid, consume
+from returns_agent.hitl.goodwill import goodwill_id
 from returns_agent.lifecycle.timers import schedule
 from returns_agent.security.pii import decrypt
 
@@ -82,10 +85,13 @@ class Relay:
 
     def _process(self, session: Session, row: Outbox, now: datetime) -> None:
         try:
-            data = self._execute(session, row, now)
+            with session.begin_nested():  # a failed attempt leaves nothing behind (token too)
+                data = self._execute(session, row, now)
         except Exception as exc:
             row.attempts += 1
             error = f"{type(exc).__name__}: {exc}"
+            if isinstance(exc, TokenInvalid):
+                row.attempts = self.max_attempts  # refused, not flaky: never retried
             if row.attempts >= self.max_attempts:
                 row.status = "failed"
                 self._resume(row, {"ok": False, "error": error})
@@ -119,6 +125,17 @@ class Relay:
             payload={"action": row.action, "key": row.idempotency_key},
         )
 
+    @staticmethod
+    def _done_before(session: Session, row: Outbox) -> bool:
+        """A retried action whose token was consumed in an earlier, committed attempt."""
+        if row.action == "refund":
+            model: Any = Refund
+            query = select(model.id).where(model.idempotency_key == row.idempotency_key)
+        else:
+            model = Exchange if row.action == "create_exchange" else ReplacementOrder
+            query = select(model.id).where(model.case_id == row.case_id)
+        return session.scalars(query).first() is not None
+
     def _resume(self, row: Outbox, result: dict[str, Any]) -> None:
         if row.action not in RESUMING_ACTIONS:
             return
@@ -134,6 +151,23 @@ class Relay:
     def _execute(self, session: Session, row: Outbox, now: datetime) -> dict[str, Any]:
         p, key, case_id = row.payload, row.idempotency_key, row.case_id
         a = self.adapters
+        if row.action in VALUE_RELEASING:
+            case = session.get(ReturnCase, case_id)
+            if (
+                case is not None
+                and case.route == "approval"
+                and not self._done_before(session, row)
+            ):
+                amount = int(p.get("amount_minor") or 0)
+                consume(session, case_id, p.get("approval_token"), row.action, amount, now)
+        if row.action == "goodwill_credit":
+            goodwill = session.get(Goodwill, goodwill_id(p), with_for_update=True)
+            result = a.payment.refund(
+                str(p["order_id"]), int(p["amount_minor"]), "store_credit", key
+            )
+            if goodwill is not None:
+                goodwill.status, goodwill.gateway_ref = result.status, result.gateway_ref
+            return {"gateway_ref": result.gateway_ref}
         if row.action == "schedule_pickup":
             booking = a.carrier.schedule_pickup(str(case_id), str(p["pincode"]), key)
             if session.scalars(select(Shipment).where(Shipment.awb == booking.awb)).first() is None:
@@ -224,8 +258,8 @@ class Relay:
         n = session.get(Notification, notification_id)
         if n is None or n.status == "sent":
             return {}
-        if n.audience == "staff":
-            to = "support-queue"
+        if n.audience != "customer":  # staff and supervisors are reached through queues
+            to = {"staff": "support-queue"}.get(n.audience, f"{n.audience}-queue")
         else:
             case = session.get(ReturnCase, n.case_id)
             customer = session.get(Customer, case.customer_id) if case else None

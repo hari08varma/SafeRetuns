@@ -21,6 +21,7 @@ from returns_agent.db.models import (
     Order,
     OrderItem,
     Product,
+    QueueItem,
     Refund,
     ReplacementOrder,
     ReturnCase,
@@ -29,7 +30,9 @@ from returns_agent.db.models import (
 from returns_agent.evidence.service import Upload, ingest, vision_assessment
 from returns_agent.evidence.store import EvidenceStore, LocalEvidenceStore
 from returns_agent.graph.runner import CaseRunner, Event, RunResult, StaleEvent
+from returns_agent.hitl import queues
 from returns_agent.lifecycle import timers
+from returns_agent.lifecycle.notify import notify
 from returns_agent.llm.client import LLMClient
 from returns_agent.security.pii import decrypt
 
@@ -37,6 +40,10 @@ DEAD = ("failed", "cancelled")  # execution rows that did not result in a return
 
 
 class CaseNotFound(Exception):
+    pass
+
+
+class ReviewNotAvailable(Exception):
     pass
 
 
@@ -316,6 +323,41 @@ class CaseService:
             case_id, Event("customer_upload", payload, "customer", str(customer_id))
         )
         return self._respond(session, result)
+
+    def staff_event(self, session: Session, case_id: uuid.UUID, event: Event) -> CaseView:
+        """A person's decision (approval, resolution) moves the case; the customer is told."""
+        result = self.runner.dispatch(case_id, event)
+        return self._respond(session, result)
+
+    def request_review(
+        self, session: Session, customer_id: uuid.UUID, case_id: uuid.UUID, reason: str
+    ) -> None:
+        """The customer asks a person to review an automated denial (once per case)."""
+        self._owned(session, customer_id, case_id)
+        case = session.get(ReturnCase, case_id)
+        assert case is not None
+        facts = self.runner.facts(case_id)
+        if case.status != "closed" or not facts.get("explanation"):
+            raise ReviewNotAvailable("only automatically declined returns can be reviewed")
+        if session.scalars(
+            select(QueueItem.id).where(QueueItem.case_id == case_id, QueueItem.queue == "review")
+        ).first():
+            raise ReviewNotAvailable("a review was already requested for this return")
+        now = datetime.now(UTC)
+        queues.enqueue(session, case_id, "review", reason[:500], queues.priority_for(facts), now)
+        self._store(session, case_id, "customer", reason, facts)
+        reply_text = "Thanks — a member of our team will review this decision and reply here."
+        self._store(session, case_id, "agent", reply_text, facts)
+        audit.append(
+            session,
+            actor_type="customer",
+            actor_id=str(customer_id),
+            case_id=case_id,
+            action="review.requested",
+            payload={"reasons": facts.get("explanation")},
+        )
+        notify(session, case_id, "review_requested", audience="staff")
+        session.commit()
 
     def history(
         self, session: Session, customer_id: uuid.UUID, case_id: uuid.UUID

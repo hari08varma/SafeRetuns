@@ -7,6 +7,7 @@ Several workers can run at once: rows are claimed with SELECT ... FOR UPDATE SKI
 import logging
 import signal
 import time
+from datetime import UTC, datetime
 from types import FrameType
 
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -19,6 +20,7 @@ from returns_agent.config import get_settings
 from returns_agent.db.models import ReturnCase
 from returns_agent.db.session import get_engine
 from returns_agent.execution.actions import ACTION_NODES
+from returns_agent.hitl import queues
 from returns_agent.lifecycle import timers
 from returns_agent.runtime import Runtime, build_runtime
 
@@ -40,6 +42,7 @@ def reconcile_all(runtime: Runtime, sessions: sessionmaker[Session]) -> int:
 def run_once(runtime: Runtime, sessions: sessionmaker[Session]) -> int:
     work = runtime.relay.run_once()
     work += timers.tick(sessions, runtime.runner.timeout)
+    work += queues.tick(sessions, datetime.now(UTC))  # overdue human work -> supervisors
     return work
 
 

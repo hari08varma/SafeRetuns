@@ -43,7 +43,7 @@ def _policies() -> tuple[list[PolicyDoc], list[PolicyDoc]]:
 
 
 @lru_cache
-def _clause_texts() -> dict[str, str]:
+def clause_texts() -> dict[str, str]:
     legal, merchant = _policies()
     return {r.clause_id: r.text for doc in legal + merchant for r in doc.rules}
 
@@ -169,7 +169,7 @@ def build_handlers(
         # Structured explanation; the responder words it for the customer.
         policy = _facts(state).get("policy") or {}
         failed = [t["clause_id"] for t in policy.get("trace", []) if t["result"] == "failed"]
-        texts = _clause_texts()
+        texts = clause_texts()
         return {
             "facts": {
                 "explanation": policy.get("reason_codes", []),
@@ -279,6 +279,9 @@ def build_handlers(
             if option not in (_facts(state).get("options") or []):
                 raise ValueError(f"approver chose an option that was not offered: {option!r}")
             update["chosen_option"] = option
+        if status == "approved":
+            # The customer can accept or decline what was approved, nothing else.
+            update["options"] = [update.get("chosen_option") or _facts(state).get("chosen_option")]
         if status == "rejected":
             update["close_outcome"] = "rejected"
         return {"facts": update}

@@ -25,6 +25,7 @@ from returns_agent.execution.actions import (
 from returns_agent.graph.events import validate_event
 from returns_agent.graph.lookahead import Feasibility
 from returns_agent.graph.registry import GraphRegistry
+from returns_agent.hitl import queues
 from returns_agent.lifecycle import notify as notifications
 from returns_agent.lifecycle import timers
 from returns_agent.lifecycle.notify import notify
@@ -156,11 +157,14 @@ class CaseRunner:
                     case_id=case.id, score=facts["risk"]["score"], signals=facts["risk"]["signals"]
                 )
             )
+        decision_row = None
         if "AUTONOMY_GATE" in new_nodes and facts.get("decision"):
             case.route = facts["decision"]["route"]
-            session.add(
-                DecisionRecord(case_id=case.id, node="AUTONOMY_GATE", record=facts["decision"])
+            decision_row = DecisionRecord(
+                case_id=case.id, node="AUTONOMY_GATE", record=facts["decision"]
             )
+            session.add(decision_row)
+            session.flush()
         for violation in violations[previous_violations:]:
             audit.append(
                 session,
@@ -186,6 +190,9 @@ class CaseRunner:
             notify(session, case.id, "pickup_failed_dropoff_available")
         notifications.on_transition(session, case.id, new_nodes, waiting_node, spec.fallback, facts)
         timers.on_transition(session, case.id, new_nodes, waiting_node, len(path), now)
+        queues.on_transition(
+            session, case.id, new_nodes, waiting_node, spec.fallback, facts, decision_row, now
+        )
 
         case.current_node = waiting_node or (path[-1] if path else case.current_node)
         if waiting_node is None:

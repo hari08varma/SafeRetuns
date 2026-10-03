@@ -1,5 +1,7 @@
 import uuid
 from collections.abc import Callable
+from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -8,11 +10,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from returns_agent.agent.cases import CaseNotFound, CaseService, CaseView
+from returns_agent.agent.cases import CaseNotFound, CaseService, CaseView, ReviewNotAvailable
 from returns_agent.api.deps import Adapters, get_adapters, get_cases, require
 from returns_agent.audit import log as audit
 from returns_agent.config import get_settings
-from returns_agent.db.models import Order, ReturnCase, StaffUser
+from returns_agent.db.models import Approval, Customer, Order, QueueItem, ReturnCase, StaffUser
 from returns_agent.db.session import get_session
 from returns_agent.evidence.intake import MAX_BYTES, MAX_FILES, EvidenceRejected
 from returns_agent.evidence.service import Upload
@@ -26,6 +28,7 @@ from returns_agent.execution.webhooks import (
 )
 from returns_agent.graph.events import InvalidEvent
 from returns_agent.graph.runner import CaseClosed, Event, StaleEvent
+from returns_agent.hitl import approvals, goodwill, handoff, queues
 from returns_agent.lifecycle.timeline import build_timeline
 from returns_agent.security.otp import InvalidOtp, OtpRateLimited, request_otp, verify_otp
 from returns_agent.security.tokens import (
@@ -442,3 +445,295 @@ async def carrier_webhook(request: Request, db: DB, cases: Cases) -> dict[str, s
 async def payment_webhook(request: Request, db: DB) -> dict[str, str]:
     body = await _verified_body(request)
     return {"result": handle_payment(db, PaymentWebhook.model_validate_json(body))}
+
+
+# --- Human in the loop: queues, handoff, approvals, resolutions, goodwill, reviews -------------
+
+Approvers = Annotated[Principal, require(Role.APPROVER, Role.ADMIN)]
+RESOLUTION_REASONS = frozenset(
+    {"handled_offline", "policy_upheld", "customer_withdrew", "fraud_confirmed", "duplicate_case"}
+)
+REVIEW_REASONS = frozenset({"policy_upheld", "policy_misapplied", "goodwill_exception"})
+
+
+def _staff(db: Session, principal: Principal) -> StaffUser:
+    try:
+        staff = db.get(StaffUser, uuid.UUID(principal.subject))
+    except ValueError:
+        staff = None
+    if staff is None or staff.status != "active":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "staff account not found or inactive")
+    return staff
+
+
+def _case_or_404(db: Session, case_id: uuid.UUID) -> ReturnCase:
+    case = db.get(ReturnCase, case_id)
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    return case
+
+
+def _hitl_error(exc: approvals.ApprovalError) -> HTTPException:
+    code = {
+        approvals.NotAllowed: status.HTTP_403_FORBIDDEN,
+        approvals.Conflict: status.HTTP_409_CONFLICT,
+    }.get(type(exc), status.HTTP_422_UNPROCESSABLE_CONTENT)
+    return HTTPException(code, str(exc))
+
+
+def _staff_audit(
+    db: Session, staff: StaffUser, case_id: uuid.UUID, action: str, **payload: Any
+) -> None:
+    audit.append(
+        db,
+        actor_type="staff",
+        actor_id=str(staff.id),
+        case_id=case_id,
+        action=action,
+        payload={"role": staff.role, **payload},
+    )
+
+
+class QueueItemOut(BaseModel):
+    id: uuid.UUID
+    case_id: uuid.UUID
+    queue: str
+    status: str
+    priority: int
+    reason: str
+    assignee_id: uuid.UUID | None
+    due_at: datetime
+    escalated: bool
+    outcome: str | None
+
+    @classmethod
+    def of(cls, item: QueueItem) -> "QueueItemOut":
+        return cls(
+            id=item.id,
+            case_id=item.case_id,
+            queue=item.queue,
+            status=item.status,
+            priority=item.priority,
+            reason=item.reason,
+            assignee_id=item.assignee_id,
+            due_at=item.due_at,
+            escalated=item.escalated_at is not None,
+            outcome=item.outcome,
+        )
+
+
+@router.get("/console/queues/{queue}")
+def queue_items(principal: StaffOps, queue: str, db: DB) -> list[QueueItemOut]:
+    if queue not in queues.QUEUES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown queue; use one of {queues.QUEUES}")
+    return [QueueItemOut.of(i) for i in queues.list_open(db, queue)]
+
+
+@router.post("/console/queue-items/{item_id}/claim")
+def claim_item(principal: StaffOps, item_id: uuid.UUID, db: DB) -> QueueItemOut:
+    staff = _staff(db, principal)
+    item = db.get(QueueItem, item_id, with_for_update=True)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "queue item not found")
+    if item.status == "done" or (item.assignee_id not in (None, staff.id)):
+        raise HTTPException(status.HTTP_409_CONFLICT, "item is closed or assigned to someone else")
+    item.status, item.assignee_id = "assigned", staff.id
+    _staff_audit(db, staff, item.case_id, "queue.claimed", queue=item.queue)
+    db.commit()
+    return QueueItemOut.of(item)
+
+
+@router.get("/console/cases/{case_id}/handoff")
+def handoff_packet(principal: StaffOps, case_id: uuid.UUID, db: DB, cases: Cases) -> dict[str, Any]:
+    _case_or_404(db, case_id)
+    return handoff.packet(db, case_id, cases.runner.facts(case_id))
+
+
+class ApprovalBody(BaseModel):
+    decision: Literal["approve", "modify", "reject"]
+    reason_code: str = Field(min_length=1, max_length=64)
+    option: str | None = None
+    note: str = Field(default="", max_length=2000)
+
+
+@router.post("/console/cases/{case_id}/approval")
+def decide_approval(
+    principal: Approvers, case_id: uuid.UUID, body: ApprovalBody, db: DB, cases: Cases
+) -> dict[str, Any]:
+    case = _case_or_404(db, case_id)
+    if case.status == "closed" or case.current_node != "HUMAN_APPROVAL":
+        raise HTTPException(status.HTTP_409_CONFLICT, "case is not waiting for approval")
+    approval = db.scalars(
+        select(Approval)
+        .where(Approval.case_id == case_id, Approval.status.in_(approvals.OPEN))
+        .with_for_update()
+    ).first()
+    if approval is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "no open approval for this case")
+    staff = _staff(db, principal)
+    facts = cases.runner.facts(case_id)
+    original = approval.requested_action
+    now = datetime.now(UTC)
+    try:
+        token = approvals.decide(
+            approval, staff, body.decision, body.reason_code, facts, now, body.option, body.note
+        )
+    except approvals.ApprovalError as exc:
+        raise _hitl_error(exc) from exc
+    _staff_audit(
+        db,
+        staff,
+        case_id,
+        "approval.signoff",
+        approval=str(approval.id),
+        decision=body.decision,
+        reason_code=body.reason_code,
+        option=approval.requested_action,
+        amount_minor=approval.amount_minor,
+        status=approval.status,
+    )
+    final = approval.status in ("approved", "rejected")
+    if final:
+        queues.close(db, case_id, "approval", approval.status, now)
+    db.commit()
+    result: dict[str, Any] = {
+        "approval": approval.status,
+        "signoffs": len(approval.signoffs),
+        "required_approvals": approval.required_approvals,
+    }
+    if not final:
+        return result
+    decision = "reject" if approval.status == "rejected" else "approve"
+    if decision == "approve" and approval.requested_action != original:
+        decision = "modify"
+    event = Event(
+        "approval",
+        {
+            "decision": decision,
+            "approver_id": str(staff.id),
+            "token": token,
+            "reason_code": body.reason_code,
+            "option": approval.requested_action if decision == "modify" else None,
+        },
+        "staff",
+        str(staff.id),
+    )
+    view = _case_call(lambda: cases.staff_event(db, case_id, event))
+    return result | {"case": asdict(view)}
+
+
+class ResolveBody(BaseModel):
+    outcome: Literal["resolved_by_human", "rejected", "cancelled"]
+    reason_code: str = Field(min_length=1, max_length=64)
+    note: str = Field(default="", max_length=2000)
+
+
+@router.post("/console/cases/{case_id}/resolve")
+def resolve_case(
+    principal: StaffOps, case_id: uuid.UUID, body: ResolveBody, db: DB, cases: Cases
+) -> CaseView:
+    case = _case_or_404(db, case_id)
+    if case.status == "closed" or case.current_node not in ("ESCALATE", "DISPUTE"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "case is not waiting for a person")
+    if body.reason_code not in RESOLUTION_REASONS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"reason code must be one of {sorted(RESOLUTION_REASONS)}",
+        )
+    staff = _staff(db, principal)
+    now = datetime.now(UTC)
+    if body.reason_code == "fraud_confirmed":  # feeds risk for later cases; never an automatic ban
+        customer = db.get(Customer, case.customer_id)
+        if customer is not None:
+            customer.risk_profile = {**customer.risk_profile, "confirmed_fraud": True}
+    for queue in ("escalation", "fraud_review", "dispute"):
+        queues.close(db, case_id, queue, body.outcome, now)
+    _staff_audit(
+        db, staff, case_id, "case.resolved", outcome=body.outcome, reason_code=body.reason_code
+    )
+    db.commit()
+    event = Event(
+        "human_resolution",
+        {"outcome": body.outcome, "staff_id": str(staff.id)},
+        "staff",
+        str(staff.id),
+    )
+    return _case_call(lambda: cases.staff_event(db, case_id, event))
+
+
+class GoodwillBody(BaseModel):
+    amount_minor: int = Field(gt=0)
+    reason_code: str = Field(min_length=1, max_length=64)
+    note: str = Field(default="", max_length=2000)
+
+
+@router.post("/console/cases/{case_id}/goodwill", status_code=status.HTTP_201_CREATED)
+def grant_goodwill(
+    principal: StaffOps, case_id: uuid.UUID, body: GoodwillBody, db: DB
+) -> dict[str, Any]:
+    case = _case_or_404(db, case_id)
+    staff = _staff(db, principal)
+    try:
+        row = goodwill.grant(
+            db, case, staff, body.amount_minor, body.reason_code, body.note, datetime.now(UTC)
+        )
+    except approvals.ApprovalError as exc:
+        raise _hitl_error(exc) from exc
+    _staff_audit(
+        db,
+        staff,
+        case_id,
+        "goodwill.granted",
+        amount_minor=body.amount_minor,
+        reason_code=body.reason_code,
+    )
+    db.commit()
+    return {"id": str(row.id), "amount_minor": row.amount_minor, "status": row.status}
+
+
+class ReviewOutcome(BaseModel):
+    outcome: Literal["upheld", "overturned"]
+    reason_code: str = Field(min_length=1, max_length=64)
+    note: str = Field(default="", max_length=2000)
+
+
+@router.post("/console/queue-items/{item_id}/close")
+def close_review(
+    principal: StaffOps, item_id: uuid.UUID, body: ReviewOutcome, db: DB
+) -> QueueItemOut:
+    """Closes a customer-requested review. An overturned denial is honoured as a case-only
+    exception (goodwill), never by changing policy."""
+    staff = _staff(db, principal)
+    item = db.get(QueueItem, item_id, with_for_update=True)
+    if item is None or item.queue != "review":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "review item not found")
+    if item.status == "done":
+        raise HTTPException(status.HTTP_409_CONFLICT, "review already closed")
+    if body.reason_code not in REVIEW_REASONS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"reason code must be one of {sorted(REVIEW_REASONS)}",
+        )
+    item.status, item.outcome, item.closed_at = "done", body.outcome, datetime.now(UTC)
+    _staff_audit(
+        db, staff, item.case_id, "review.closed", outcome=body.outcome, reason_code=body.reason_code
+    )
+    db.commit()
+    return QueueItemOut.of(item)
+
+
+class ReviewRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+@router.post("/cases/{case_id}/review", status_code=status.HTTP_202_ACCEPTED)
+def request_review(
+    principal: CustomerOnly, case_id: uuid.UUID, body: ReviewRequest, db: DB, cases: Cases
+) -> dict[str, str]:
+    try:
+        cases.request_review(db, uuid.UUID(principal.subject), case_id, body.reason)
+    except CaseNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except ReviewNotAvailable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"status": "review requested"}
