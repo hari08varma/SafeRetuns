@@ -1,32 +1,28 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Inter } from "next/font/google";
+import { Header } from "./header";
 import "./globals.css";
 
+const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
+
 export const metadata: Metadata = {
-  title: "SafeReturns",
+  title: "Vapsi",
   description: "Autonomous product return resolution",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={sans.variable}>
       <body>
         <a className="skip" href="#main">
           Skip to content
         </a>
-        <header className="top">
-          <Link href="/" className="brand">
-            SafeReturns
-          </Link>
-          <nav aria-label="Main">
-            <Link href="/orders">My orders</Link>
-            <Link href="/profile">My details</Link>
-            <Link href="/console">Support console</Link>
-            <Link href="/analytics">Analytics</Link>
-            <Link href="/admin">Admin</Link>
-          </nav>
-        </header>
+        <Header />
         <main id="main">{children}</main>
+        <footer className="site">
+          <span>Vapsi · Returns, resolved.</span>
+          <span>AI decisions follow the store&apos;s return policy. A person reviews risky cases.</span>
+        </footer>
       </body>
     </html>
   );

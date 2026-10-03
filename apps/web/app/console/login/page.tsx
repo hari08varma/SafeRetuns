@@ -22,15 +22,16 @@ export default function StaffLogin() {
   }
 
   return (
-    <form className="card" style={{ maxWidth: 420 }} onSubmit={submit}>
+    <form className="card auth" onSubmit={submit}>
       <h1>Staff sign in</h1>
+      <p className="lead">Support console, analytics and admin.</p>
       <label htmlFor="email">Work email</label>
       <input id="email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
       <label htmlFor="password">Password</label>
       <input id="password" type="password" autoComplete="current-password" value={password}
         onChange={(e) => setPassword(e.target.value)} required />
       {error && <p className="error" role="alert">{error}</p>}
-      <button className="primary" type="submit" style={{ marginTop: 12 }}>Sign in</button>
+      <button className="primary" type="submit">Sign in</button>
     </form>
   );
 }

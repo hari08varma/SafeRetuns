@@ -70,8 +70,9 @@ export default function CustomerLogin() {
   }
 
   return (
-    <section className="card" style={{ maxWidth: 420 }}>
+    <section className="card auth">
       <h1>Sign in or create an account</h1>
+      <p className="lead">Track your returns and chat with the Vapsi assistant.</p>
       {!sent ? (
         <form onSubmit={requestCode}>
           <label htmlFor="phone">Mobile number</label>
