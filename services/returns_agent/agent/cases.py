@@ -3,9 +3,10 @@ message. Every customer and agent message is stored (with a redacted copy) and a
 
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from returns_agent.agent.context import redactor_for
@@ -50,8 +51,37 @@ def _pii(session: Session, customer: Customer) -> dict[str, str]:
     }
 
 
+def customer_stats(
+    session: Session, customer: Customer, exclude_case: uuid.UUID | None = None
+) -> dict[str, int]:
+    since = datetime.now(UTC) - timedelta(days=90)
+    returns = (
+        select(func.count())
+        .select_from(ReturnCase)
+        .where(ReturnCase.customer_id == customer.id, ReturnCase.created_at >= since)
+    )
+    if exclude_case is not None:
+        returns = returns.where(ReturnCase.id != exclude_case)
+    orders = (
+        select(func.count())
+        .select_from(Order)
+        .where(Order.customer_id == customer.id, Order.placed_at >= since)
+    )
+    return {
+        "returns_90d": session.scalar(returns) or 0,
+        "orders_90d": session.scalar(orders) or 0,
+        "account_age_days": customer.account_age_days,
+    }
+
+
 def build_case_facts(
-    session: Session, customer: Customer, order: Order, item: OrderItem, qty: int, message: str
+    session: Session,
+    customer: Customer,
+    order: Order,
+    item: OrderItem,
+    qty: int,
+    message: str,
+    case_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     product = session.scalars(select(Product).where(Product.sku == item.sku)).one()
     address = session.scalars(select(Address).where(Address.customer_id == customer.id)).first()
@@ -78,6 +108,7 @@ def build_case_facts(
             "qty_already_returned": already,
         },
         "request": {},
+        "customer_stats": customer_stats(session, customer, exclude_case=case_id),
         "pricing": {
             "unit_price_minor": item.unit_price_minor,
             "line_discount_minor": item.discount_alloc_minor,
@@ -114,7 +145,7 @@ class CaseService:
         )
         session.add(case)
         session.flush()
-        facts = build_case_facts(session, customer, order, item, qty, message)
+        facts = build_case_facts(session, customer, order, item, qty, message, case.id)
         facts["principal_customer_id"] = str(customer_id)
         self._store(session, case.id, "customer", message, facts)
         session.commit()

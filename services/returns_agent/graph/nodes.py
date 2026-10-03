@@ -2,13 +2,15 @@
 
 Real: AUTHENTICATE, IDENTIFY_ORDER and UNDERSTAND_REQUEST (LLM when configured),
 CHECK_ELIGIBILITY (policy engine), EXPLAIN_INELIGIBLE (clause texts), GENERATE_OPTIONS
-(look-ahead + refund quote), and the waiting nodes' event handling. Marked STUB nodes get
-their real logic later (decisions: Phase 5, execution: Phase 6, evidence/risk: Phase 8);
+(look-ahead + refund quote), RISK_SCORE / SCORE_OPTIONS / AUTONOMY_GATE (decision layer),
+and the waiting nodes' event handling. Marked STUB nodes get their real logic later
+(execution: Phase 6, evidence: Phase 8);
 each stub keeps the state contract those phases fill in. Without an LLM, the LLM nodes
 fall back to structured input from the API.
 Handlers never call external systems directly; side effects go through the outbox (Phase 6).
 """
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
@@ -16,6 +18,12 @@ from typing import Any
 from returns_agent.agent.identify import identify_item
 from returns_agent.agent.understand import MIN_AGREEMENT, understand
 from returns_agent.config import config_dir
+from returns_agent.decision.config import DecisionConfig, load_decision_config
+from returns_agent.decision.gate import confidence, decide_route
+from returns_agent.decision.record import build_record
+from returns_agent.decision.risk import RiskResult, assess_risk, item_value_minor
+from returns_agent.decision.scoring import ScoredOption, keep_item_economical
+from returns_agent.decision.scoring import score_options as rank_options
 from returns_agent.graph.compiler import CaseState, Handler
 from returns_agent.graph.lookahead import Feasibility, feasible_options
 from returns_agent.graph.schema import GraphSpec, NodeSpec
@@ -52,8 +60,16 @@ def _trace(f: dict[str, Any], node: str, entry: dict[str, Any]) -> dict[str, Any
     return {**(f.get("llm_trace") or {}), node: entry}
 
 
+@lru_cache
+def default_decision_config() -> DecisionConfig:
+    return load_decision_config(config_dir() / "decision.yaml")
+
+
 def build_handlers(
-    spec: GraphSpec, feasibility: Feasibility, llm: LLMClient | None = None
+    spec: GraphSpec,
+    feasibility: Feasibility,
+    llm: LLMClient | None = None,
+    decision: Callable[[], DecisionConfig] = default_decision_config,
 ) -> dict[str, Handler]:
     def start(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         return {"counters": {"turns": 1, "clarifications": 0, "evidence_requests": 0}}
@@ -171,14 +187,15 @@ def build_handlers(
         return {"facts": {"evidence": {"needs_more": False}}}  # STUB (Phase 8)
 
     def risk_score(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        # STUB (Phase 5/8): keeps any risk supplied upstream, else zero.
-        return {"facts": {"risk": _facts(state).get("risk") or {"score": 0.0, "signals": []}}}
+        # Rule-based signals now; evidence signals and a model arrive in Phase 8.
+        return {"facts": {"risk": assess_risk(_facts(state), decision()).model_dump()}}
 
     def generate_options(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         f = _facts(state)
         policy = f.get("policy") or {}
         allowed = [o for o in OPTION_ORDER if o in policy.get("allowed_resolutions", [])]
-        if f.get("keep_item_eligible") and "refund" in allowed:
+        risk = float((f.get("risk") or {}).get("score", 0.0))
+        if "refund" in allowed and keep_item_economical(f, decision(), risk):
             allowed.append("keep_item_refund")
         quote = _refund_quote(f, policy)
         pruned: dict[str, str] = {}
@@ -195,19 +212,29 @@ def build_handlers(
         }
 
     def score_options(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        # STUB (Phase 5): utility scoring. Customer preference if offered, else default order.
         f = _facts(state)
-        options = f.get("options") or []
-        preferred = (f.get("request") or {}).get("desired_resolution")
-        return {"facts": {"chosen_option": preferred if preferred in options else options[0]}}
+        risk = float((f.get("risk") or {}).get("score", 0.0))
+        scored = rank_options(f.get("options") or [], f, decision(), risk)
+        return {
+            "facts": {
+                "chosen_option": scored[0].option,
+                "scored_options": [s.model_dump() for s in scored],
+            }
+        }
 
     def autonomy_gate(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        # STUB (Phase 5): risk x value x confidence. Safety flags always escalate.
         f = _facts(state)
-        flags = f.get("flags") or {}
-        if flags.get("legal_threat") or flags.get("wants_human"):
-            return {"facts": {"route": "escalate"}}
-        return {"facts": {"route": f.get("route_override") or "auto"}}
+        cfg = decision()
+        risk = RiskResult.model_validate(f.get("risk") or {"score": 0.0, "signals": []})
+        value = item_value_minor(f)
+        conf = confidence(f)
+        gate = decide_route(risk.score, value, conf["overall"], f.get("flags") or {}, cfg)
+        if f.get("route_override") and gate.route != "escalate":
+            # Test hook only: the API never sets route_override.
+            gate = gate.model_copy(update={"route": f["route_override"], "reason": "override"})
+        scored = [ScoredOption.model_validate(s) for s in f.get("scored_options") or []]
+        record = build_record(f, scored, risk, conf, gate, value, cfg, state.get("graph_version"))
+        return {"facts": {"route": gate.route, "decision": record}}
 
     def human_approval(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         e = _event(state)

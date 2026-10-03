@@ -332,3 +332,41 @@ def test_case_finishes_on_the_version_it_started(
     versions = {(r.case_id, r.payload["graph_version"]) for r in rows}
     assert {v for c, v in versions if c == old_case} == {"returns-v1"}
     assert {v for c, v in versions if c == new_case_id} == {"returns-v2"}
+
+
+def test_decision_record_is_stored(seeded_db: Session, runner: CaseRunner) -> None:
+    from returns_agent.db.models import DecisionRecord, RiskAssessment
+
+    case_id, cust = new_case(seeded_db, runner)
+    runner.start(case_id, case_facts(cust))
+    seeded_db.expire_all()
+    record = seeded_db.scalars(
+        select(DecisionRecord).where(DecisionRecord.case_id == case_id)
+    ).one()
+    assert record.record["chosen"] == "refund" and record.record["route"] == "auto"
+    assert record.record["versions"]["graph"] == "returns-v1"
+    risk = seeded_db.scalars(select(RiskAssessment).where(RiskAssessment.case_id == case_id)).one()
+    assert risk.score == 0.0
+    case = seeded_db.get(ReturnCase, case_id)
+    assert case is not None and case.route == "auto"
+
+
+def test_keep_item_refund_end_to_end(seeded_db: Session, runner: CaseRunner) -> None:
+    case_id, cust = new_case(seeded_db, runner)
+    r = runner.start(
+        case_id,
+        case_facts(
+            cust,
+            item={"sku": "SRM-30ml", "category": "beauty"},
+            request={"reason_category": "damaged", "desired_resolution": "refund"},
+            pricing={
+                "unit_price_minor": 79900,
+                "payments": [{"method": "upi", "amount_minor": 79900}],
+            },
+            evidence_provided=True,
+        ),
+    )
+    assert r.facts["chosen_option"] == "keep_item_refund"
+    assert "keep_item_refund" in r.facts["options"]
+    r = runner.dispatch(case_id, Event("customer_confirm", {"accept": True}))
+    assert r.current_node == "CLOSE" and r.facts["refund_issued"] is True

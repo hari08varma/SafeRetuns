@@ -1,0 +1,40 @@
+# Decision layer settings (admin-editable). Values outside the hard limits in
+# returns_agent/decision/config.py are rejected at load time.
+version: "2026-10-a"
+
+weights:            # option utility = revenue - cost + customer_fit - risk x exposure
+  revenue: 0.25
+  cost: 0.25
+  customer_fit: 0.40
+  risk: 0.10
+
+costs_minor:        # paise
+  reverse_shipping: 8000
+  handling: 3000
+  forward_shipping: 6000
+
+recovery_rate:      # share of item value recovered when a returned item is resold
+  default: 0.7
+  apparel: 0.8
+  footwear: 0.7
+  electronics: 0.6
+  beauty: 0.1       # opened cosmetics usually cannot be resold
+
+risk:
+  high_return_ratio: 0.3   # >= 50% of recent orders returned (at least 2 returns)
+  serial_returner: 0.3     # >= 5 returns in 90 days
+  new_account: 0.15        # account younger than 30 days
+  high_value: 0.15         # item value >= high_value_minor
+  same_day_return: 0.2     # return started on the delivery day
+  cod_high_value: 0.1      # cash on delivery and value >= cod_high_value_minor
+  high_value_minor: 2000000
+  cod_high_value_minor: 1000000
+
+gate:
+  auto_max_risk: 0.3
+  auto_max_value_minor: 500000
+  auto_min_confidence: 0.8
+  escalate_min_risk: 0.6
+  escalate_below_confidence: 0.6
+
+kill_switch: false  # true: nothing is auto-approved; every AUTO decision needs approval

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from returns_agent.adapters.base import CarrierAdapter, InventoryAdapter
 from returns_agent.audit import log as audit
-from returns_agent.db.models import ReturnCase
+from returns_agent.db.models import DecisionRecord, ReturnCase, RiskAssessment
 from returns_agent.graph.events import validate_event
 from returns_agent.graph.lookahead import Feasibility
 from returns_agent.graph.registry import GraphRegistry
@@ -137,6 +137,19 @@ class CaseRunner:
                     "graph_version": case.graph_version,
                     "llm": llm_trace.get(node),  # prompt versions used by this node
                 },
+            )
+        facts = values.get("facts", {})
+        new_nodes = path[previous_path:]
+        if "RISK_SCORE" in new_nodes and facts.get("risk"):
+            session.add(
+                RiskAssessment(
+                    case_id=case.id, score=facts["risk"]["score"], signals=facts["risk"]["signals"]
+                )
+            )
+        if "AUTONOMY_GATE" in new_nodes and facts.get("decision"):
+            case.route = facts["decision"]["route"]
+            session.add(
+                DecisionRecord(case_id=case.id, node="AUTONOMY_GATE", record=facts["decision"])
             )
         for violation in violations[previous_violations:]:
             audit.append(
