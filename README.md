@@ -3,38 +3,40 @@
 Autonomous product return resolution agent: a procedural graph (versioned JSON, run on LangGraph),
 a decision-intelligence layer, and bounded self-improvement. See the implementation plan.
 
-## Status: Phase 0 complete (except the live DeepSeek check)
+## Status
 
-| Item | State |
+| Phase | State |
 |---|---|
-| Project scaffold, Docker Compose (Postgres+pgvector, Redis, MinIO), Makefile, CI | Done |
-| ADRs 01–15 | `docs/adr/README.md` |
-| LLM layer: `LLMClient`, structured output with validation + retry, `FakeProvider`, `DeepSeekProvider` | Done, unit-tested |
-| LangGraph spike: compile JSON graph, Postgres checkpoint across a real restart, pause/resume, versions side by side, idempotent refund | **GO** — `docs/spike-reports/langgraph.md` |
-| LLM spike against DeepSeek-V4.1-Flash | Script ready; **not run yet** — `docs/spike-reports/llm.md` |
-| Synthetic seed data generator | Done, unit-tested |
+| 0 — scaffold, LLM layer, LangGraph spike (GO), seed generator | Done (live DeepSeek check: run `make spike-llm`) |
+| 1 — foundations | **Done**: schema v1 (27 tables, Alembic), customer OTP + staff login (argon2, JWT access/refresh), RBAC with an enforced role matrix, PII encryption + blind indexes, hash-chained audit log, mock adapters with failure injection, seed loader, request-ID JSON logging |
 
-## Quick start
-
-Requires Docker, [uv](https://docs.astral.sh/uv/) and Python 3.11+.
+## Quick start (laptop with Docker)
 
 ```bash
-make install        # Python deps
-make up             # Postgres, Redis, MinIO
-make check          # lint + type check + all tests (incl. Postgres)
-make spike-graph    # re-run LangGraph spike
-make seed           # writes seed.json
-cp .env.example services/.env && make spike-llm   # needs DEEPSEEK_API_KEY
+cp .env.example services/.env   # fill JWT_SECRET, PII_ENCRYPTION_KEY, PII_INDEX_KEY (commands inside)
+make install && make up          # deps; Postgres (+ returns_test), Redis, MinIO
+make migrate && make seed-db STAFF_PASSWORD='<12+ chars>'
+make api                         # http://localhost:8000/docs
+make check                       # lint + types + all tests (uses returns_test, reset each run)
+make spike-llm                   # live DeepSeek check (DEEPSEEK_API_KEY in services/.env)
 ```
+
+Demo staff logins: `<role>@saferetuns.dev` (agent, approver, admin, qc_operator, analyst).
 
 ## Layout
 
 ```
 services/
   returns_agent/
+    api/        FastAPI app, auth + RBAC dependencies, routes
+    adapters/   external-system interfaces + mocks with failure injection
+    audit/      hash-chained audit log
+    db/         SQLAlchemy models, session
+    security/   tokens, passwords, OTP, PII encryption
     llm/        client interface, structured output, fake + DeepSeek providers
     graph/      graph JSON schema + validation, JSONLogic conditions, LangGraph compiler
-    seed/       synthetic data generator
+    seed/       synthetic data generator + DB loader
+  migrations/   Alembic
   spikes/       langgraph_spike.py, llm_spike.py
   tests/
 config/graphs/  versioned graph JSON (spike_v1, spike_v2)

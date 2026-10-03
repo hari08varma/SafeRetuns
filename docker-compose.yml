@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: returns
       POSTGRES_DB: returns
     ports: ["5432:5432"]
-    volumes: [pgdata:/var/lib/postgresql/data]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U returns"]
       interval: 5s

@@ -14,12 +14,12 @@ jobs:
         env:
           POSTGRES_USER: returns
           POSTGRES_PASSWORD: returns
-          POSTGRES_DB: returns
+          POSTGRES_DB: returns_test
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U returns" --health-interval 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://returns:returns@localhost:5432/returns
+      DATABASE_URL: postgresql://returns:returns@localhost:5432/returns_test
     defaults:
       run:
         working-directory: services
