@@ -1,29 +1,15 @@
 """Shared FastAPI dependencies: adapters, authentication and role checks."""
 
+__all__ = ["Adapters", "current_principal", "get_adapters", "get_cases", "guard_roles", "require"]
+
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from returns_agent.adapters.base import (
-    CarrierAdapter,
-    InventoryAdapter,
-    NotificationAdapter,
-    OrderAdapter,
-    PaymentAdapter,
-)
+from returns_agent.adapters.bundle import Adapters
 from returns_agent.security.tokens import InvalidToken, Principal, Role, decode_token
-
-
-@dataclass
-class Adapters:
-    orders: OrderAdapter
-    carrier: CarrierAdapter
-    payment: PaymentAdapter
-    inventory: InventoryAdapter
-    notification: NotificationAdapter
 
 
 def get_adapters(request: Request) -> Adapters:

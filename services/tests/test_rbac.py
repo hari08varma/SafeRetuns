@@ -19,6 +19,9 @@ PUBLIC = {
     "/api/v1/auth/otp/verify",
     "/api/v1/auth/staff/login",
     "/api/v1/auth/refresh",
+    # authenticated by HMAC signature instead of a bearer token:
+    "/api/v1/webhooks/carrier",
+    "/api/v1/webhooks/payment",
 }
 
 EXPECTED: dict[tuple[str, str], set[Role]] = {
@@ -31,6 +34,9 @@ EXPECTED: dict[tuple[str, str], set[Role]] = {
     ("POST", "/api/v1/cases/{case_id}/messages"): {Role.CUSTOMER},
     ("POST", "/api/v1/cases/{case_id}/confirm"): {Role.CUSTOMER},
     ("GET", "/api/v1/cases/{case_id}/messages"): {Role.CUSTOMER},
+    ("GET", "/api/v1/cases/{case_id}/timeline"): {Role.CUSTOMER},
+    ("GET", "/api/v1/console/cases/{case_id}/timeline"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
+    ("POST", "/api/v1/console/cases/{case_id}/qc"): {Role.QC_OPERATOR, Role.ADMIN},
 }
 
 BODIES = {
@@ -38,6 +44,7 @@ BODIES = {
     ("POST", "/api/v1/cases"): {"order_id": "ORD-X", "item_id": "ORD-X-1", "message": "hi"},
     ("POST", "/api/v1/cases/{case_id}/messages"): {"text": "hi"},
     ("POST", "/api/v1/cases/{case_id}/confirm"): {"accept": True},
+    ("POST", "/api/v1/console/cases/{case_id}/qc"): {"passed": True},
 }
 
 

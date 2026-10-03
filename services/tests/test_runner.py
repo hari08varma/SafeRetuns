@@ -14,15 +14,24 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from returns_agent.adapters.mock import MockCarrierAdapter, MockInventoryAdapter
+from returns_agent.adapters.bundle import Adapters
+from returns_agent.adapters.mock import (
+    MockCarrierAdapter,
+    MockInventoryAdapter,
+    MockNotificationAdapter,
+    MockOrderAdapter,
+    MockPaymentAdapter,
+)
 from returns_agent.audit import log as audit
 from returns_agent.config import config_dir
 from returns_agent.db.models import AuditEvent, Customer, Order, ReturnCase
 from returns_agent.db.session import get_engine
+from returns_agent.execution.relay import Relay
 from returns_agent.graph.events import InvalidEvent
 from returns_agent.graph.nodes import build_handlers
 from returns_agent.graph.registry import GraphRegistry
 from returns_agent.graph.runner import CaseClosed, CaseRunner, Event, StaleEvent, make_feasibility
+from returns_agent.seed.generator import generate
 from tests.conftest import needs_db
 
 pytestmark = [needs_db]
@@ -67,6 +76,33 @@ def runner(
     saver: PostgresSaver, inventory: MockInventoryAdapter, carrier: MockCarrierAdapter
 ) -> CaseRunner:
     return make_runner(saver, inventory, carrier)
+
+
+def make_relay(
+    runner: CaseRunner, inventory: MockInventoryAdapter, carrier: MockCarrierAdapter
+) -> Relay:
+    adapters = Adapters(
+        orders=MockOrderAdapter(generate(seed=1, customers=1)),
+        carrier=carrier,
+        payment=MockPaymentAdapter(),
+        inventory=inventory,
+        notification=MockNotificationAdapter(),
+    )
+    return Relay(get_engine(), runner, adapters)
+
+
+@pytest.fixture
+def relay(
+    runner: CaseRunner, inventory: MockInventoryAdapter, carrier: MockCarrierAdapter
+) -> Relay:
+    return make_relay(runner, inventory, carrier)
+
+
+def current(db: Session, case_id: uuid.UUID) -> ReturnCase:
+    db.expire_all()
+    case = db.get(ReturnCase, case_id)
+    assert case is not None
+    return case
 
 
 def new_case(db: Session, runner: CaseRunner) -> tuple[uuid.UUID, str]:
@@ -119,7 +155,7 @@ def nodes_audited(db: Session, case_id: uuid.UUID) -> list[str]:
     return [r.payload["node"] for r in rows]
 
 
-def test_refund_happy_path_end_to_end(seeded_db: Session, runner: CaseRunner) -> None:
+def test_refund_happy_path_end_to_end(seeded_db: Session, runner: CaseRunner, relay: Relay) -> None:
     case_id, cust = new_case(seeded_db, runner)
     r = runner.start(case_id, case_facts(cust))
     assert (r.current_node, r.waiting_for, r.status) == (
@@ -132,7 +168,9 @@ def test_refund_happy_path_end_to_end(seeded_db: Session, runner: CaseRunner) ->
     assert r.facts["refund_quote"] == {"total_minor": 129900, "max_refundable_minor": 129900}
 
     r = runner.dispatch(case_id, Event("customer_confirm", {"accept": True}, "customer", cust))
-    assert r.current_node == "TRACK_SHIPMENT"
+    assert (r.current_node, r.waiting_for) == ("SCHEDULE_PICKUP", "action_result")
+    relay.drain()  # books the pickup and resumes the case
+    assert current(seeded_db, case_id).current_node == "TRACK_SHIPMENT"
     r = runner.dispatch(case_id, Event("carrier_event", {"event": "picked_up"}))
     assert r.current_node == "TRACK_SHIPMENT"  # keeps waiting until received
     r = runner.dispatch(case_id, Event("carrier_event", {"event": "received"}))
@@ -140,12 +178,11 @@ def test_refund_happy_path_end_to_end(seeded_db: Session, runner: CaseRunner) ->
     r = runner.dispatch(
         case_id, Event("qc_result", {"passed": True, "grade": "A"}, "staff", "qc-1")
     )
-    assert (r.status, r.current_node, r.waiting_for) == ("closed", "CLOSE", None)
-    assert r.facts["close_outcome"] == "resolved" and r.facts["refund_issued"] is True
+    assert (r.current_node, r.waiting_for) == ("ISSUE_REFUND", "action_result")
+    relay.drain()  # performs the refund and resumes the case
+    case = current(seeded_db, case_id)
+    assert (case.status, case.current_node) == ("closed", "CLOSE")
 
-    seeded_db.expire_all()
-    case = seeded_db.get(ReturnCase, case_id)
-    assert case is not None and case.status == "closed" and case.current_node == "CLOSE"
     assert nodes_audited(seeded_db, case_id)[-3:] == ["INSPECT_QC", "ISSUE_REFUND", "CLOSE"]
     assert audit.verify(seeded_db, case_id).ok
     with pytest.raises(CaseClosed):
@@ -202,11 +239,14 @@ def test_approval_pause_and_resume(
     assert nodes_audited(seeded_db, case_id).count("HUMAN_APPROVAL") == 1
 
 
-def test_approval_without_token_cannot_refund(seeded_db: Session, runner: CaseRunner) -> None:
+def test_approval_without_token_cannot_refund(
+    seeded_db: Session, runner: CaseRunner, relay: Relay
+) -> None:
     case_id, cust = new_case(seeded_db, runner)
     runner.start(case_id, case_facts(cust, route_override="approval"))
     runner.dispatch(case_id, Event("approval", {"decision": "approve", "approver_id": "a1"}))
     runner.dispatch(case_id, Event("customer_confirm", {"accept": True}))
+    relay.drain()
     runner.dispatch(case_id, Event("carrier_event", {"event": "received"}))
     r = runner.dispatch(case_id, Event("qc_result", {"passed": True}))
     assert r.status == "escalated"
@@ -263,12 +303,16 @@ def test_restart_resumes_from_checkpoint_without_duplicates(
     first.start(case_id, case_facts(cust))
     first.dispatch(case_id, Event("customer_confirm", {"accept": True}))
     del first
-    # A new process: fresh checkpointer connection, registry and runner.
+    # A new process: fresh checkpointer connection, registry, runner and relay.
     with PostgresSaver.from_conn_string(os.environ["DATABASE_URL"]) as fresh_saver:
         second = make_runner(fresh_saver, inventory, carrier)
+        relay = make_relay(second, inventory, carrier)
+        relay.drain()
         second.dispatch(case_id, Event("carrier_event", {"event": "received"}))
-        r = second.dispatch(case_id, Event("qc_result", {"passed": True}))
-    assert r.status == "closed" and r.facts["refund_issued"] is True
+        second.dispatch(case_id, Event("qc_result", {"passed": True}))
+        relay.drain()
+        relay.drain()  # a second pass finds nothing new to do
+    assert current(seeded_db, case_id).status == "closed"
     assert nodes_audited(seeded_db, case_id).count("ISSUE_REFUND") == 1
 
 
@@ -351,7 +395,7 @@ def test_decision_record_is_stored(seeded_db: Session, runner: CaseRunner) -> No
     assert case is not None and case.route == "auto"
 
 
-def test_keep_item_refund_end_to_end(seeded_db: Session, runner: CaseRunner) -> None:
+def test_keep_item_refund_end_to_end(seeded_db: Session, runner: CaseRunner, relay: Relay) -> None:
     case_id, cust = new_case(seeded_db, runner)
     r = runner.start(
         case_id,
@@ -369,4 +413,6 @@ def test_keep_item_refund_end_to_end(seeded_db: Session, runner: CaseRunner) -> 
     assert r.facts["chosen_option"] == "keep_item_refund"
     assert "keep_item_refund" in r.facts["options"]
     r = runner.dispatch(case_id, Event("customer_confirm", {"accept": True}))
-    assert r.current_node == "CLOSE" and r.facts["refund_issued"] is True
+    assert r.current_node == "KEEP_ITEM_REFUND"
+    relay.drain()
+    assert current(seeded_db, case_id).status == "closed"

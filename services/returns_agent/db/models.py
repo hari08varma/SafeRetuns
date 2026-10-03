@@ -298,18 +298,35 @@ class Outbox(Entity):
 class Notification(Entity):
     __tablename__ = "notification"
     case_id: Mapped[uuid.UUID | None] = fk("return_case.id", nullable=True)
+    audience: Mapped[str] = mapped_column(  # customer | staff
+        String(16), default="customer", server_default="customer"
+    )
     channel: Mapped[str] = mapped_column(String(16))
     template: Mapped[str] = mapped_column(String(64))
+    data: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default="{}")
     status: Mapped[str] = mapped_column(String(16), default="pending")
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SlaTimer(Entity):
     __tablename__ = "sla_timer"
+    __table_args__ = (Index("ix_sla_timer_case_kind", "case_id", "kind", unique=True),)
     case_id: Mapped[uuid.UUID] = fk("return_case.id")
-    kind: Mapped[str] = mapped_column(String(32))
+    kind: Mapped[str] = mapped_column(String(64))
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WebhookEvent(Base):
+    """Processed webhook ids, so a replayed delivery is applied only once."""
+
+    __tablename__ = "webhook_event"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source: Mapped[str] = mapped_column(String(32))
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 # --- Audit ---------------------------------------------------------------------------------

@@ -57,6 +57,12 @@ def test_v1_has_the_25_planned_nodes() -> None:
         "INSPECT_QC",
         "DISPUTE",
         "ESCALATE",
+        # execution nodes wait for their outbox action's result
+        "SCHEDULE_PICKUP",
+        "CREATE_EXCHANGE",
+        "CREATE_REPLACEMENT",
+        "ISSUE_REFUND",
+        "KEEP_ITEM_REFUND",
     }
 
 

@@ -3,125 +3,685 @@
   "start": "START",
   "fallback": "ESCALATE",
   "nodes": [
-    {"id": "START", "kind": "code", "task": "Initialise the case"},
-    {"id": "AUTHENTICATE", "kind": "code", "task": "Confirm the requester owns the case"},
-    {"id": "IDENTIFY_ORDER", "kind": "code", "task": "Match the request to an order and item",
-     "allowed_tools": ["get_order", "list_orders"]},
-    {"id": "UNDERSTAND_REQUEST", "kind": "llm", "task": "Extract item, reason and desired outcome"},
-    {"id": "CLARIFY", "kind": "llm", "task": "Record the customer's answer to a missing detail",
-     "waits_for": "customer_message"},
-    {"id": "CHECK_ELIGIBILITY", "kind": "code", "task": "Apply legal and merchant policy",
-     "on_failure": {"retry": 0}},
-    {"id": "EXPLAIN_INELIGIBLE", "kind": "llm", "task": "Explain the decision, citing clauses"},
-    {"id": "REQUEST_EVIDENCE", "kind": "llm", "task": "Collect the evidence policy requires",
-     "waits_for": "customer_upload"},
-    {"id": "ASSESS_EVIDENCE", "kind": "llm", "task": "Assess condition and authenticity",
-     "allowed_tools": ["get_catalog_images", "run_authenticity_checks"]},
-    {"id": "RISK_SCORE", "kind": "code", "task": "Score fraud and abuse risk"},
-    {"id": "GENERATE_OPTIONS", "kind": "code", "task": "List legal, feasible resolutions"},
-    {"id": "SCORE_OPTIONS", "kind": "code", "task": "Score options and pick the best"},
-    {"id": "AUTONOMY_GATE", "kind": "code", "task": "Route: auto, approval or escalate"},
-    {"id": "HUMAN_APPROVAL", "kind": "human", "task": "Approver decides", "waits_for": "approval"},
-    {"id": "CUSTOMER_CONFIRM", "kind": "human", "task": "Customer accepts or picks an option",
-     "waits_for": "customer_confirm"},
-    {"id": "SCHEDULE_PICKUP", "kind": "code", "task": "Book reverse pickup",
-     "requires": ["pincode_serviceable"], "allowed_tools": ["schedule_pickup"]},
-    {"id": "TRACK_SHIPMENT", "kind": "code", "task": "Follow the return shipment",
-     "waits_for": "carrier_event"},
-    {"id": "INSPECT_QC", "kind": "human", "task": "Quality check of the returned item",
-     "waits_for": "qc_result"},
-    {"id": "ISSUE_REFUND", "kind": "code", "task": "Refund through the outbox",
-     "allowed_tools": ["refund"]},
-    {"id": "CREATE_REPLACEMENT", "kind": "code", "task": "Create the replacement order",
-     "allowed_tools": ["create_replacement"]},
-    {"id": "CREATE_EXCHANGE", "kind": "code", "task": "Reserve stock and create the exchange",
-     "requires": ["stock_available"], "allowed_tools": ["reserve_stock"]},
-    {"id": "KEEP_ITEM_REFUND", "kind": "code", "task": "Refund without a return shipment",
-     "allowed_tools": ["refund"]},
-    {"id": "DISPUTE", "kind": "human", "task": "Resolve a contested outcome",
-     "waits_for": "human_resolution"},
-    {"id": "ESCALATE", "kind": "human", "task": "Specialist handles the case",
-     "waits_for": "human_resolution"},
-    {"id": "CLOSE", "kind": "terminal", "task": "Close the case"}
+    {
+      "id": "START",
+      "kind": "code",
+      "task": "Initialise the case"
+    },
+    {
+      "id": "AUTHENTICATE",
+      "kind": "code",
+      "task": "Confirm the requester owns the case"
+    },
+    {
+      "id": "IDENTIFY_ORDER",
+      "kind": "code",
+      "task": "Match the request to an order and item",
+      "allowed_tools": [
+        "get_order",
+        "list_orders"
+      ]
+    },
+    {
+      "id": "UNDERSTAND_REQUEST",
+      "kind": "llm",
+      "task": "Extract item, reason and desired outcome"
+    },
+    {
+      "id": "CLARIFY",
+      "kind": "llm",
+      "task": "Record the customer's answer to a missing detail",
+      "waits_for": "customer_message"
+    },
+    {
+      "id": "CHECK_ELIGIBILITY",
+      "kind": "code",
+      "task": "Apply legal and merchant policy",
+      "on_failure": {
+        "retry": 0
+      }
+    },
+    {
+      "id": "EXPLAIN_INELIGIBLE",
+      "kind": "llm",
+      "task": "Explain the decision, citing clauses"
+    },
+    {
+      "id": "REQUEST_EVIDENCE",
+      "kind": "llm",
+      "task": "Collect the evidence policy requires",
+      "waits_for": "customer_upload"
+    },
+    {
+      "id": "ASSESS_EVIDENCE",
+      "kind": "llm",
+      "task": "Assess condition and authenticity",
+      "allowed_tools": [
+        "get_catalog_images",
+        "run_authenticity_checks"
+      ]
+    },
+    {
+      "id": "RISK_SCORE",
+      "kind": "code",
+      "task": "Score fraud and abuse risk"
+    },
+    {
+      "id": "GENERATE_OPTIONS",
+      "kind": "code",
+      "task": "List legal, feasible resolutions"
+    },
+    {
+      "id": "SCORE_OPTIONS",
+      "kind": "code",
+      "task": "Score options and pick the best"
+    },
+    {
+      "id": "AUTONOMY_GATE",
+      "kind": "code",
+      "task": "Route: auto, approval or escalate"
+    },
+    {
+      "id": "HUMAN_APPROVAL",
+      "kind": "human",
+      "task": "Approver decides",
+      "waits_for": "approval"
+    },
+    {
+      "id": "CUSTOMER_CONFIRM",
+      "kind": "human",
+      "task": "Customer accepts or picks an option",
+      "waits_for": "customer_confirm"
+    },
+    {
+      "id": "SCHEDULE_PICKUP",
+      "kind": "code",
+      "task": "Book reverse pickup (via outbox)",
+      "requires": [
+        "pincode_serviceable"
+      ],
+      "allowed_tools": [
+        "schedule_pickup"
+      ],
+      "waits_for": "action_result"
+    },
+    {
+      "id": "TRACK_SHIPMENT",
+      "kind": "code",
+      "task": "Follow the return shipment",
+      "waits_for": "carrier_event"
+    },
+    {
+      "id": "INSPECT_QC",
+      "kind": "human",
+      "task": "Quality check of the returned item",
+      "waits_for": "qc_result"
+    },
+    {
+      "id": "ISSUE_REFUND",
+      "kind": "code",
+      "task": "Refund (via outbox)",
+      "allowed_tools": [
+        "refund"
+      ],
+      "waits_for": "action_result"
+    },
+    {
+      "id": "CREATE_REPLACEMENT",
+      "kind": "code",
+      "task": "Create the replacement order (via outbox)",
+      "allowed_tools": [
+        "create_replacement"
+      ],
+      "waits_for": "action_result"
+    },
+    {
+      "id": "CREATE_EXCHANGE",
+      "kind": "code",
+      "task": "Reserve stock and create the exchange (via outbox)",
+      "requires": [
+        "stock_available"
+      ],
+      "allowed_tools": [
+        "reserve_stock"
+      ],
+      "waits_for": "action_result"
+    },
+    {
+      "id": "KEEP_ITEM_REFUND",
+      "kind": "code",
+      "task": "Refund without a return shipment (via outbox)",
+      "allowed_tools": [
+        "refund"
+      ],
+      "waits_for": "action_result"
+    },
+    {
+      "id": "DISPUTE",
+      "kind": "human",
+      "task": "Resolve a contested outcome",
+      "waits_for": "human_resolution"
+    },
+    {
+      "id": "ESCALATE",
+      "kind": "human",
+      "task": "Specialist handles the case",
+      "waits_for": "human_resolution"
+    },
+    {
+      "id": "CLOSE",
+      "kind": "terminal",
+      "task": "Close the case"
+    }
   ],
   "edges": [
-    {"from": "START", "to": "AUTHENTICATE"},
-    {"from": "AUTHENTICATE", "to": "IDENTIFY_ORDER",
-     "condition": {"==": [{"var": "facts.authenticated"}, true]}},
-    {"from": "IDENTIFY_ORDER", "to": "UNDERSTAND_REQUEST",
-     "condition": {"!!": [{"var": "facts.order.order_id"}]}},
-    {"from": "UNDERSTAND_REQUEST", "to": "CLARIFY", "priority": 10,
-     "condition": {"!!": [{"var": "facts.missing_slots"}]},
-     "guidance": "Ask for one missing detail at a time, in the customer's language.",
-     "pitfalls": ["Do not promise any outcome before eligibility is checked."]},
-    {"from": "UNDERSTAND_REQUEST", "to": "CHECK_ELIGIBILITY",
-     "condition": {"!": [{"var": "facts.missing_slots"}]}},
-    {"from": "CLARIFY", "to": "UNDERSTAND_REQUEST"},
-    {"from": "CHECK_ELIGIBILITY", "to": "REQUEST_EVIDENCE", "priority": 20,
-     "condition": {"and": [
-       {"==": [{"var": "facts.policy.eligible"}, true]},
-       {"!!": [{"var": "facts.policy.required_evidence"}]},
-       {"!": [{"var": "facts.evidence_provided"}]}]},
-     "guidance": "Ask only for the evidence the policy requires, and say why."},
-    {"from": "CHECK_ELIGIBILITY", "to": "RISK_SCORE", "priority": 10,
-     "condition": {"==": [{"var": "facts.policy.eligible"}, true]}},
-    {"from": "CHECK_ELIGIBILITY", "to": "EXPLAIN_INELIGIBLE",
-     "condition": {"==": [{"var": "facts.policy.eligible"}, false]},
-     "guidance": "Cite the clause and offer alternatives such as warranty or human review.",
-     "pitfalls": ["Never imply the customer is dishonest."]},
-    {"from": "EXPLAIN_INELIGIBLE", "to": "ESCALATE", "priority": 10,
-     "condition": {"==": [{"var": "facts.human_review_requested"}, true]}},
-    {"from": "EXPLAIN_INELIGIBLE", "to": "CLOSE"},
-    {"from": "REQUEST_EVIDENCE", "to": "ASSESS_EVIDENCE"},
-    {"from": "ASSESS_EVIDENCE", "to": "REQUEST_EVIDENCE", "priority": 20,
-     "condition": {"==": [{"var": "facts.evidence.needs_more"}, true]}},
-    {"from": "ASSESS_EVIDENCE", "to": "RISK_SCORE", "priority": 10},
-    {"from": "RISK_SCORE", "to": "GENERATE_OPTIONS"},
-    {"from": "GENERATE_OPTIONS", "to": "SCORE_OPTIONS",
-     "condition": {"!!": [{"var": "facts.options"}]}},
-    {"from": "SCORE_OPTIONS", "to": "AUTONOMY_GATE",
-     "guidance": "Present at most two options; lead with exchange for size or fit.",
-     "pitfalls": ["Do not quote a refund amount that code has not computed."]},
-    {"from": "AUTONOMY_GATE", "to": "CUSTOMER_CONFIRM", "priority": 30,
-     "condition": {"==": [{"var": "facts.route"}, "auto"]}},
-    {"from": "AUTONOMY_GATE", "to": "HUMAN_APPROVAL", "priority": 20,
-     "condition": {"==": [{"var": "facts.route"}, "approval"]}},
-    {"from": "AUTONOMY_GATE", "to": "ESCALATE", "priority": 10,
-     "condition": {"==": [{"var": "facts.route"}, "escalate"]}},
-    {"from": "HUMAN_APPROVAL", "to": "CUSTOMER_CONFIRM", "priority": 20,
-     "condition": {"==": [{"var": "facts.approval.status"}, "approved"]}},
-    {"from": "HUMAN_APPROVAL", "to": "CLOSE", "priority": 10,
-     "condition": {"==": [{"var": "facts.approval.status"}, "rejected"]}},
-    {"from": "CUSTOMER_CONFIRM", "to": "CLOSE", "priority": 40,
-     "condition": {"==": [{"var": "facts.confirmed"}, false]}},
-    {"from": "CUSTOMER_CONFIRM", "to": "KEEP_ITEM_REFUND", "priority": 30,
-     "condition": {"==": [{"var": "facts.chosen_option"}, "keep_item_refund"]}},
-    {"from": "CUSTOMER_CONFIRM", "to": "CREATE_EXCHANGE", "priority": 20,
-     "condition": {"==": [{"var": "facts.chosen_option"}, "exchange"]}},
-    {"from": "CUSTOMER_CONFIRM", "to": "CREATE_REPLACEMENT", "priority": 20,
-     "condition": {"==": [{"var": "facts.chosen_option"}, "replacement"]}},
-    {"from": "CUSTOMER_CONFIRM", "to": "SCHEDULE_PICKUP", "priority": 10,
-     "condition": {"in": [{"var": "facts.chosen_option"}, ["refund", "store_credit"]]}},
-    {"from": "CREATE_EXCHANGE", "to": "SCHEDULE_PICKUP"},
-    {"from": "CREATE_REPLACEMENT", "to": "SCHEDULE_PICKUP"},
-    {"from": "SCHEDULE_PICKUP", "to": "TRACK_SHIPMENT",
-     "condition": {"==": [{"var": "facts.pickup.scheduled"}, true]}},
-    {"from": "TRACK_SHIPMENT", "to": "INSPECT_QC", "priority": 30,
-     "condition": {"==": [{"var": "facts.shipment.status"}, "received"]}},
-    {"from": "TRACK_SHIPMENT", "to": "ESCALATE", "priority": 20,
-     "condition": {">=": [{"var": "facts.shipment.failed_attempts"}, 3]}},
-    {"from": "TRACK_SHIPMENT", "to": "TRACK_SHIPMENT", "priority": 10},
-    {"from": "INSPECT_QC", "to": "ISSUE_REFUND", "priority": 30,
-     "condition": {"and": [{"==": [{"var": "facts.qc.passed"}, true]},
-                           {"in": [{"var": "facts.chosen_option"}, ["refund", "store_credit"]]}]}},
-    {"from": "INSPECT_QC", "to": "CLOSE", "priority": 20,
-     "condition": {"and": [{"==": [{"var": "facts.qc.passed"}, true]},
-                           {"in": [{"var": "facts.chosen_option"}, ["exchange", "replacement"]]}]}},
-    {"from": "INSPECT_QC", "to": "DISPUTE", "priority": 10,
-     "condition": {"==": [{"var": "facts.qc.passed"}, false]}},
-    {"from": "ISSUE_REFUND", "to": "CLOSE"},
-    {"from": "KEEP_ITEM_REFUND", "to": "CLOSE"},
-    {"from": "DISPUTE", "to": "CLOSE"},
-    {"from": "ESCALATE", "to": "CLOSE"}
+    {
+      "from": "START",
+      "to": "AUTHENTICATE"
+    },
+    {
+      "from": "AUTHENTICATE",
+      "to": "IDENTIFY_ORDER",
+      "condition": {
+        "==": [
+          {
+            "var": "facts.authenticated"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "IDENTIFY_ORDER",
+      "to": "UNDERSTAND_REQUEST",
+      "condition": {
+        "!!": [
+          {
+            "var": "facts.order.order_id"
+          }
+        ]
+      }
+    },
+    {
+      "from": "UNDERSTAND_REQUEST",
+      "to": "CLARIFY",
+      "priority": 10,
+      "condition": {
+        "!!": [
+          {
+            "var": "facts.missing_slots"
+          }
+        ]
+      },
+      "guidance": "Ask for one missing detail at a time, in the customer's language.",
+      "pitfalls": [
+        "Do not promise any outcome before eligibility is checked."
+      ]
+    },
+    {
+      "from": "UNDERSTAND_REQUEST",
+      "to": "CHECK_ELIGIBILITY",
+      "condition": {
+        "!": [
+          {
+            "var": "facts.missing_slots"
+          }
+        ]
+      }
+    },
+    {
+      "from": "CLARIFY",
+      "to": "CLOSE",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.timed_out"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "CLARIFY",
+      "to": "UNDERSTAND_REQUEST"
+    },
+    {
+      "from": "CHECK_ELIGIBILITY",
+      "to": "REQUEST_EVIDENCE",
+      "priority": 20,
+      "condition": {
+        "and": [
+          {
+            "==": [
+              {
+                "var": "facts.policy.eligible"
+              },
+              true
+            ]
+          },
+          {
+            "!!": [
+              {
+                "var": "facts.policy.required_evidence"
+              }
+            ]
+          },
+          {
+            "!": [
+              {
+                "var": "facts.evidence_provided"
+              }
+            ]
+          }
+        ]
+      },
+      "guidance": "Ask only for the evidence the policy requires, and say why."
+    },
+    {
+      "from": "CHECK_ELIGIBILITY",
+      "to": "RISK_SCORE",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.policy.eligible"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "CHECK_ELIGIBILITY",
+      "to": "EXPLAIN_INELIGIBLE",
+      "condition": {
+        "==": [
+          {
+            "var": "facts.policy.eligible"
+          },
+          false
+        ]
+      },
+      "guidance": "Cite the clause and offer alternatives such as warranty or human review.",
+      "pitfalls": [
+        "Never imply the customer is dishonest."
+      ]
+    },
+    {
+      "from": "EXPLAIN_INELIGIBLE",
+      "to": "ESCALATE",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.human_review_requested"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "EXPLAIN_INELIGIBLE",
+      "to": "CLOSE"
+    },
+    {
+      "from": "REQUEST_EVIDENCE",
+      "to": "CLOSE",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.timed_out"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "REQUEST_EVIDENCE",
+      "to": "ASSESS_EVIDENCE"
+    },
+    {
+      "from": "ASSESS_EVIDENCE",
+      "to": "REQUEST_EVIDENCE",
+      "priority": 20,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.evidence.needs_more"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "ASSESS_EVIDENCE",
+      "to": "RISK_SCORE",
+      "priority": 10
+    },
+    {
+      "from": "RISK_SCORE",
+      "to": "GENERATE_OPTIONS"
+    },
+    {
+      "from": "GENERATE_OPTIONS",
+      "to": "SCORE_OPTIONS",
+      "condition": {
+        "!!": [
+          {
+            "var": "facts.options"
+          }
+        ]
+      }
+    },
+    {
+      "from": "SCORE_OPTIONS",
+      "to": "AUTONOMY_GATE",
+      "guidance": "Present at most two options; lead with exchange for size or fit.",
+      "pitfalls": [
+        "Do not quote a refund amount that code has not computed."
+      ]
+    },
+    {
+      "from": "AUTONOMY_GATE",
+      "to": "CUSTOMER_CONFIRM",
+      "priority": 30,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.route"
+          },
+          "auto"
+        ]
+      }
+    },
+    {
+      "from": "AUTONOMY_GATE",
+      "to": "HUMAN_APPROVAL",
+      "priority": 20,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.route"
+          },
+          "approval"
+        ]
+      }
+    },
+    {
+      "from": "AUTONOMY_GATE",
+      "to": "ESCALATE",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.route"
+          },
+          "escalate"
+        ]
+      }
+    },
+    {
+      "from": "HUMAN_APPROVAL",
+      "to": "CUSTOMER_CONFIRM",
+      "priority": 20,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.approval.status"
+          },
+          "approved"
+        ]
+      }
+    },
+    {
+      "from": "HUMAN_APPROVAL",
+      "to": "CLOSE",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.approval.status"
+          },
+          "rejected"
+        ]
+      }
+    },
+    {
+      "from": "CUSTOMER_CONFIRM",
+      "to": "CLOSE",
+      "priority": 40,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.confirmed"
+          },
+          false
+        ]
+      }
+    },
+    {
+      "from": "CUSTOMER_CONFIRM",
+      "to": "KEEP_ITEM_REFUND",
+      "priority": 30,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.chosen_option"
+          },
+          "keep_item_refund"
+        ]
+      }
+    },
+    {
+      "from": "CUSTOMER_CONFIRM",
+      "to": "CREATE_EXCHANGE",
+      "priority": 20,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.chosen_option"
+          },
+          "exchange"
+        ]
+      }
+    },
+    {
+      "from": "CUSTOMER_CONFIRM",
+      "to": "CREATE_REPLACEMENT",
+      "priority": 20,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.chosen_option"
+          },
+          "replacement"
+        ]
+      }
+    },
+    {
+      "from": "CUSTOMER_CONFIRM",
+      "to": "SCHEDULE_PICKUP",
+      "priority": 10,
+      "condition": {
+        "in": [
+          {
+            "var": "facts.chosen_option"
+          },
+          [
+            "refund",
+            "store_credit"
+          ]
+        ]
+      }
+    },
+    {
+      "from": "CREATE_EXCHANGE",
+      "to": "SCHEDULE_PICKUP",
+      "condition": {
+        "==": [
+          {
+            "var": "facts.exchange.status"
+          },
+          "created"
+        ]
+      }
+    },
+    {
+      "from": "CREATE_REPLACEMENT",
+      "to": "SCHEDULE_PICKUP",
+      "condition": {
+        "==": [
+          {
+            "var": "facts.replacement.status"
+          },
+          "created"
+        ]
+      }
+    },
+    {
+      "from": "SCHEDULE_PICKUP",
+      "to": "TRACK_SHIPMENT",
+      "condition": {
+        "==": [
+          {
+            "var": "facts.pickup.scheduled"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "TRACK_SHIPMENT",
+      "to": "INSPECT_QC",
+      "priority": 30,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.shipment.status"
+          },
+          "received"
+        ]
+      }
+    },
+    {
+      "from": "TRACK_SHIPMENT",
+      "to": "ESCALATE",
+      "priority": 20,
+      "condition": {
+        ">=": [
+          {
+            "var": "facts.shipment.failed_attempts"
+          },
+          3
+        ]
+      }
+    },
+    {
+      "from": "TRACK_SHIPMENT",
+      "to": "TRACK_SHIPMENT",
+      "priority": 10
+    },
+    {
+      "from": "INSPECT_QC",
+      "to": "ISSUE_REFUND",
+      "priority": 30,
+      "condition": {
+        "and": [
+          {
+            "==": [
+              {
+                "var": "facts.qc.passed"
+              },
+              true
+            ]
+          },
+          {
+            "in": [
+              {
+                "var": "facts.chosen_option"
+              },
+              [
+                "refund",
+                "store_credit"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "from": "INSPECT_QC",
+      "to": "CLOSE",
+      "priority": 20,
+      "condition": {
+        "and": [
+          {
+            "==": [
+              {
+                "var": "facts.qc.passed"
+              },
+              true
+            ]
+          },
+          {
+            "in": [
+              {
+                "var": "facts.chosen_option"
+              },
+              [
+                "exchange",
+                "replacement"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "from": "INSPECT_QC",
+      "to": "DISPUTE",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.qc.passed"
+          },
+          false
+        ]
+      }
+    },
+    {
+      "from": "ISSUE_REFUND",
+      "to": "CLOSE",
+      "condition": {
+        "==": [
+          {
+            "var": "facts.refund_issued"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "KEEP_ITEM_REFUND",
+      "to": "CLOSE",
+      "condition": {
+        "==": [
+          {
+            "var": "facts.refund_issued"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "DISPUTE",
+      "to": "CLOSE"
+    },
+    {
+      "from": "ESCALATE",
+      "to": "CLOSE"
+    }
   ]
 }

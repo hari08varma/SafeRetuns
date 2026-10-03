@@ -51,6 +51,20 @@ services:
       interval: 10s
       retries: 5
 
+  worker:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+    command: ["python", "-m", "returns_agent.workers.run"]
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      - path: ./services/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://returns:returns@postgres:5432/returns
+
 volumes:
   pgdata:
   miniodata:

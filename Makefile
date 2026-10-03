@@ -3,7 +3,7 @@ TEST_DB_URL ?= postgresql://returns:returns@localhost:5432/returns_test
 STAFF_PASSWORD ?= change-me-please
 RUN = uv run --directory services
 
-.PHONY: install up down migrate seed-db api lint typecheck test test-all spike-graph spike-llm agent-smoke seed check
+.PHONY: install up down migrate seed-db api lint typecheck test test-all spike-graph spike-llm agent-smoke worker seed check
 
 install:
 	cd services && uv sync
@@ -22,6 +22,9 @@ seed-db:       ## loads seed data + demo staff <role>@saferetuns.dev
 
 api:           ## dev server on :8000 (needs services/.env with secrets)
 	DATABASE_URL=$(DB_URL) $(RUN) uvicorn returns_agent.api.main:app --reload
+
+worker:        ## outbox relay + timers (run next to `make api`)
+	DATABASE_URL=$(DB_URL) $(RUN) python -m returns_agent.workers.run
 
 lint:
 	$(RUN) ruff check . && $(RUN) ruff format --check .

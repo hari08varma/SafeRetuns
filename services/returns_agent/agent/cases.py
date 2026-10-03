@@ -22,6 +22,7 @@ from returns_agent.db.models import (
     ReturnCase,
 )
 from returns_agent.graph.runner import CaseRunner, Event, RunResult
+from returns_agent.lifecycle import timers
 from returns_agent.llm.client import LLMClient
 from returns_agent.security.pii import decrypt
 
@@ -130,6 +131,7 @@ class CaseService:
         item_ref: str,
         qty: int,
         message: str,
+        request: dict[str, Any] | None = None,
     ) -> CaseView:
         customer = session.get(Customer, customer_id)
         order = session.scalars(
@@ -147,6 +149,7 @@ class CaseService:
         session.flush()
         facts = build_case_facts(session, customer, order, item, qty, message, case.id)
         facts["principal_customer_id"] = str(customer_id)
+        facts["request"] = {k: v for k, v in (request or {}).items() if v}  # UI selections
         self._store(session, case.id, "customer", message, facts)
         session.commit()
         result = self.runner.start(case.id, facts)
@@ -170,11 +173,18 @@ class CaseService:
         case_id: uuid.UUID,
         accept: bool,
         option: str | None,
+        refund_method: str | None = None,
+        exchange_sku: str | None = None,
     ) -> CaseView:
         self._owned(session, customer_id, case_id)
         payload: dict[str, Any] = {"accept": accept}
-        if option:
-            payload["option"] = option
+        for key, value in (
+            ("option", option),
+            ("refund_method", refund_method),
+            ("exchange_sku", exchange_sku),
+        ):
+            if value:
+                payload[key] = value
         result = self.runner.dispatch(
             case_id, Event("customer_confirm", payload, "customer", str(customer_id))
         )
@@ -206,6 +216,7 @@ class CaseService:
         waiting = result.current_node if result.waiting_for else None
         answer = reply(self.llm, {**result.facts, "conversation": conversation}, waiting)
         self._store(session, result.case_id, "agent", answer.text, result.facts)
+        timers.agent_replied(session, result.case_id, datetime.now(UTC))  # response SLAs met
         audit.append(
             session,
             actor_type="ai",

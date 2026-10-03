@@ -1,8 +1,8 @@
 import uuid
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -11,10 +11,20 @@ from sqlalchemy.orm import Session, selectinload
 from returns_agent.agent.cases import CaseNotFound, CaseService, CaseView
 from returns_agent.api.deps import Adapters, get_adapters, get_cases, require
 from returns_agent.audit import log as audit
+from returns_agent.config import get_settings
 from returns_agent.db.models import Order, ReturnCase, StaffUser
 from returns_agent.db.session import get_session
+from returns_agent.execution.webhooks import (
+    CarrierWebhook,
+    PaymentWebhook,
+    WebhookAuthError,
+    handle_carrier,
+    handle_payment,
+    verify_signature,
+)
 from returns_agent.graph.events import InvalidEvent
-from returns_agent.graph.runner import CaseClosed, StaleEvent
+from returns_agent.graph.runner import CaseClosed, Event, StaleEvent
+from returns_agent.lifecycle.timeline import build_timeline
 from returns_agent.security.otp import InvalidOtp, OtpRateLimited, request_otp, verify_otp
 from returns_agent.security.tokens import (
     STAFF_ROLES,
@@ -245,6 +255,20 @@ class OpenCase(BaseModel):
     item_id: str
     qty: int = Field(default=1, ge=1)
     message: str = Field(min_length=1, max_length=4000)
+    # Optional selections from the UI; the agent extracts them from the message otherwise.
+    reason_category: (
+        Literal[
+            "size_fit",
+            "damaged",
+            "defective",
+            "wrong_item",
+            "not_as_described",
+            "changed_mind",
+            "other",
+        ]
+        | None
+    ) = None
+    desired_resolution: Literal["refund", "exchange", "replacement", "store_credit"] | None = None
 
 
 class CustomerText(BaseModel):
@@ -254,6 +278,8 @@ class CustomerText(BaseModel):
 class Confirm(BaseModel):
     accept: bool
     option: str | None = None
+    refund_method: Literal["source", "bank_transfer", "upi", "store_credit"] | None = None
+    exchange_sku: str | None = Field(default=None, max_length=64)
 
 
 def _case_call(fn: Callable[[], CaseView]) -> CaseView:
@@ -271,7 +297,18 @@ def _case_call(fn: Callable[[], CaseView]) -> CaseView:
 def open_case(principal: CustomerOnly, body: OpenCase, db: DB, cases: Cases) -> CaseView:
     customer = uuid.UUID(principal.subject)
     return _case_call(
-        lambda: cases.open(db, customer, body.order_id, body.item_id, body.qty, body.message)
+        lambda: cases.open(
+            db,
+            customer,
+            body.order_id,
+            body.item_id,
+            body.qty,
+            body.message,
+            {
+                "reason_category": body.reason_category,
+                "desired_resolution": body.desired_resolution,
+            },
+        )
     )
 
 
@@ -288,7 +325,11 @@ def case_confirm(
     principal: CustomerOnly, case_id: uuid.UUID, body: Confirm, db: DB, cases: Cases
 ) -> CaseView:
     customer = uuid.UUID(principal.subject)
-    return _case_call(lambda: cases.confirm(db, customer, case_id, body.accept, body.option))
+    return _case_call(
+        lambda: cases.confirm(
+            db, customer, case_id, body.accept, body.option, body.refund_method, body.exchange_sku
+        )
+    )
 
 
 @router.get("/cases/{case_id}/messages")
@@ -299,3 +340,79 @@ def case_history(
         return cases.history(db, uuid.UUID(principal.subject), case_id)
     except CaseNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+@router.get("/cases/{case_id}/timeline")
+def customer_timeline(principal: CustomerOnly, case_id: uuid.UUID, db: DB) -> list[dict[str, Any]]:
+    case = db.get(ReturnCase, case_id)
+    if case is None or case.customer_id != uuid.UUID(principal.subject):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    return build_timeline(db, case_id, "customer")
+
+
+# --- Staff case operations --------------------------------------------------------------------
+
+StaffOps = Annotated[Principal, require(Role.AGENT, Role.APPROVER, Role.ADMIN)]
+QcStaff = Annotated[Principal, require(Role.QC_OPERATOR, Role.ADMIN)]
+
+
+class QcBody(BaseModel):
+    passed: bool
+    grade: Literal["A", "B", "C", "D"] | None = None
+
+
+@router.get("/console/cases/{case_id}/timeline")
+def staff_timeline(principal: StaffOps, case_id: uuid.UUID, db: DB) -> list[dict[str, Any]]:
+    if db.get(ReturnCase, case_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    return build_timeline(db, case_id, "staff")
+
+
+@router.post("/console/cases/{case_id}/qc")
+def record_qc(
+    principal: QcStaff, case_id: uuid.UUID, body: QcBody, db: DB, cases: Cases
+) -> dict[str, Any]:
+    if db.get(ReturnCase, case_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    payload: dict[str, Any] = {"passed": body.passed}
+    if body.grade:
+        payload["grade"] = body.grade
+    try:
+        result = cases.runner.dispatch(
+            case_id, Event("qc_result", payload, "staff", principal.subject)
+        )
+    except (StaleEvent, CaseClosed) as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"case_id": str(case_id), "current_node": result.current_node, "status": result.status}
+
+
+# --- Provider webhooks (HMAC-authenticated, no bearer token) ------------------------------------
+
+
+async def _verified_body(request: Request) -> bytes:
+    body = await request.body()
+    settings = get_settings()
+    try:
+        verify_signature(
+            settings.webhook_secret,
+            request.headers.get("x-timestamp"),
+            request.headers.get("x-signature"),
+            body,
+            settings.webhook_tolerance_s,
+        )
+    except WebhookAuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    return body
+
+
+@router.post("/webhooks/carrier")
+async def carrier_webhook(request: Request, db: DB, cases: Cases) -> dict[str, str]:
+    body = await _verified_body(request)
+    hook = CarrierWebhook.model_validate_json(body)
+    return {"result": handle_carrier(db, cases.runner, hook)}
+
+
+@router.post("/webhooks/payment")
+async def payment_webhook(request: Request, db: DB) -> dict[str, str]:
+    body = await _verified_body(request)
+    return {"result": handle_payment(db, PaymentWebhook.model_validate_json(body))}

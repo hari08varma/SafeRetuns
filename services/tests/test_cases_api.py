@@ -132,7 +132,8 @@ def test_open_case_with_llm_then_confirm(
     r = client.post(
         f"/api/v1/cases/{view['case_id']}/confirm", json={"accept": True}, headers=headers(customer)
     )
-    assert r.status_code == 200 and r.json()["current_node"] == "TRACK_SHIPMENT"
+    assert r.status_code == 200 and r.json()["current_node"] == "SCHEDULE_PICKUP"
+    assert r.json()["waiting_for"] == "action_result"  # the relay books the pickup
 
     sent = json.dumps([c.messages for c in fake.calls], ensure_ascii=False)
     assert phone not in sent and name not in sent  # PII never reached the model

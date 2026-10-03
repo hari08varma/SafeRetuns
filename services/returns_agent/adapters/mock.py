@@ -64,6 +64,7 @@ class MockOrderAdapter:
             for o in seed.orders
         }
         self._replacements: dict[str, str] = {}
+        self.cancelled: dict[str, str] = {}
 
     def get_order(self, order_id: str) -> OrderInfo:
         self.faults.apply("order.get")
@@ -80,6 +81,11 @@ class MockOrderAdapter:
             self.faults.apply("order.create_replacement")
             self._replacements[idempotency_key] = f"REPL-{len(self._replacements) + 1:05d}"
         return self._replacements[idempotency_key]
+
+    def cancel_order(self, order_ref: str, idempotency_key: str) -> None:
+        if idempotency_key not in self.cancelled:
+            self.faults.apply("order.cancel")
+            self.cancelled[idempotency_key] = order_ref
 
 
 class MockCarrierAdapter:
@@ -135,6 +141,8 @@ class MockInventoryAdapter:
         self.faults = faults or FaultPlan()
         self.stock = dict(stock or {})
         self._reservations: dict[str, str] = {}
+        self._reserved: dict[str, tuple[str, int]] = {}
+        self.released: set[str] = set()
 
     def in_stock(self, sku: str, qty: int = 1) -> bool:
         self.faults.apply("inventory.in_stock")
@@ -148,7 +156,16 @@ class MockInventoryAdapter:
             raise AdapterError(f"{sku} out of stock")
         self.stock[sku] -= qty
         self._reservations[idempotency_key] = f"RSV-{len(self._reservations) + 1:05d}"
+        self._reserved[self._reservations[idempotency_key]] = (sku, qty)
         return self._reservations[idempotency_key]
+
+    def release(self, reservation_id: str, idempotency_key: str) -> None:
+        if idempotency_key in self.released or reservation_id not in self._reserved:
+            return
+        self.faults.apply("inventory.release")
+        sku, qty = self._reserved.pop(reservation_id)
+        self.stock[sku] = self.stock.get(sku, 0) + qty
+        self.released.add(idempotency_key)
 
 
 class MockNotificationAdapter:

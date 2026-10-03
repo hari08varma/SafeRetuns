@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request, Response
 
-from returns_agent.api.deps import Adapters
+from returns_agent.adapters.bundle import Adapters
 from returns_agent.api.routes import router
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")

@@ -3,7 +3,7 @@ before they reach the graph, so a typo never escalates or corrupts a case."""
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class _Event(BaseModel):
@@ -13,15 +13,33 @@ class _Event(BaseModel):
 class CustomerMessage(_Event):
     text: str = ""
     answers: dict[str, Any] = Field(default_factory=dict)
+    timed_out: bool = False  # sent by the inactivity timer, never by customers
 
 
 class CustomerUpload(_Event):
-    files: list[str] = Field(min_length=1)
+    files: list[str] = Field(default_factory=list)
+    timed_out: bool = False
+
+    @model_validator(mode="after")
+    def files_or_timeout(self) -> "CustomerUpload":
+        if not self.files and not self.timed_out:
+            raise ValueError("at least one file is required")
+        return self
 
 
 class CustomerConfirm(_Event):
     accept: bool
     option: str | None = None
+    refund_method: Literal["source", "bank_transfer", "upi", "store_credit"] | None = None
+    exchange_sku: str | None = None
+    timed_out: bool = False
+
+
+class ActionResult(_Event):
+    action: str
+    ok: bool
+    data: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
 
 
 class Approval(_Event):
@@ -55,6 +73,7 @@ SCHEMAS: dict[str, type[_Event]] = {
     "carrier_event": CarrierEvent,
     "qc_result": QcResult,
     "human_resolution": HumanResolution,
+    "action_result": ActionResult,
 }
 
 

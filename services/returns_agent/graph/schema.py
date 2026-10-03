@@ -15,6 +15,7 @@ WaitsFor = Literal[
     "carrier_event",
     "qc_result",
     "human_resolution",
+    "action_result",
 ]
 
 

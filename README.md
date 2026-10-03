@@ -13,6 +13,7 @@ a decision-intelligence layer, and bounded self-improvement. See the implementat
 | 3 — graph runtime on LangGraph | **Done**: graph `returns-v1` (25 nodes, node contracts, 8 waiting nodes), next-step choice with conditions → loop guards → hard invariants (INV-1..5, 7) → look-ahead, fallback to ESCALATE, case runner with per-case lock, typed events, Postgres checkpoints, version pinning and audited transitions. LLM/decision/execution nodes are labelled stubs until Phases 4–6 |
 | 4 — LLM layer (DeepSeek-V4.1-Flash) | **Done (live check pending)**: PII redaction before every call, versioned prompts, strict role separation, request understanding with 3-sample agreement, order matching, verified customer replies (deterministic + LLM verifier, template fallback), metering + circuit breaker, customer case API. Run `make agent-smoke` with your key |
 | 5 — decision layer | **Done**: `config/decision.yaml` with hard limits in code, rule-based risk with named signals, option economics (keep-item refund when shipping back costs more than resale), deterministic utility scoring, confidence = weakest input, gate (auto / approval / escalate) with kill switch, decision records stored per case |
+| 6 — execution & lifecycle | **Done**: transactional outbox with idempotency keys, relay worker (SKIP LOCKED, exponential backoff, permanent failure → ESCALATE), all five flows (refund, keep-item, replacement, exchange, rejection), saga compensation after 3 failed pickups, milestone notifications, SLA/reminder/timeout timers (first response, grievance 48h/30d, 7-day resolution, refund TAT), HMAC-signed + replay-protected + de-duplicated carrier/payment webhooks, QC endpoint, customer/staff timelines, crash reconciliation |
 
 ## Quick start (laptop with Docker)
 
@@ -21,6 +22,7 @@ cp .env.example services/.env   # fill JWT_SECRET, PII_ENCRYPTION_KEY, PII_INDEX
 make install && make up          # deps; Postgres (+ returns_test), Redis, MinIO
 make migrate && make seed-db STAFF_PASSWORD='<12+ chars>'
 make api                         # http://localhost:8000/docs
+make worker                      # outbox relay + timers (side effects run here)
 make check                       # lint + types + all tests (uses returns_test, reset each run)
 docker compose up --build        # or run everything, including the API, in Docker
 make spike-llm                   # live DeepSeek API check (DEEPSEEK_API_KEY in services/.env)

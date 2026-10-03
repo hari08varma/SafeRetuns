@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     pii_encryption_key: str = ""  # Fernet key
     pii_index_key: str = ""  # HMAC key for searchable blind indexes
 
+    webhook_secret: str = ""  # HMAC secret shared with carrier/payment providers
+    webhook_tolerance_s: int = 300
+
     otp_ttl_s: int = 300
     otp_max_attempts: int = 5
     otp_max_requests_per_window: int = 3

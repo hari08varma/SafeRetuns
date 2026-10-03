@@ -9,6 +9,7 @@ from cryptography.fernet import Fernet
 os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 32)
 os.environ.setdefault("PII_ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("PII_INDEX_KEY", "test-index-key")
+os.environ.setdefault("WEBHOOK_SECRET", "test-webhook-secret")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402

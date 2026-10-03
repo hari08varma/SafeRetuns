@@ -8,6 +8,15 @@ from returns_agent.db.session import sqlalchemy_url
 target_metadata = Base.metadata
 
 
+def include_object(
+    obj: object, name: str | None, type_: str, reflected: bool, compare_to: object
+) -> bool:
+    # Only manage our own tables: LangGraph owns its checkpoint tables in the same database.
+    if type_ == "table" and reflected and compare_to is None:
+        return False
+    return True
+
+
 def url() -> str:
     # An explicit -x url=... wins (used by tests); otherwise DATABASE_URL from settings.
     explicit = context.get_x_argument(as_dictionary=True).get("url")
@@ -16,7 +25,11 @@ def url() -> str:
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=url(), target_metadata=target_metadata, literal_binds=True, compare_type=True
+        url=url(),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -25,7 +38,12 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     engine = create_engine(url(), poolclass=pool.NullPool)
     with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            include_object=include_object,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

@@ -4,7 +4,7 @@ Real: AUTHENTICATE, IDENTIFY_ORDER and UNDERSTAND_REQUEST (LLM when configured),
 CHECK_ELIGIBILITY (policy engine), EXPLAIN_INELIGIBLE (clause texts), GENERATE_OPTIONS
 (look-ahead + refund quote), RISK_SCORE / SCORE_OPTIONS / AUTONOMY_GATE (decision layer),
 and the waiting nodes' event handling. Marked STUB nodes get their real logic later
-(execution: Phase 6, evidence: Phase 8);
+(evidence: Phase 8); execution nodes process outbox results;
 each stub keeps the state contract those phases fill in. Without an LLM, the LLM nodes
 fall back to structured input from the API.
 Handlers never call external systems directly; side effects go through the outbox (Phase 6).
@@ -134,6 +134,8 @@ def build_handlers(
         if e.get("text"):
             conversation.append({"role": "customer", "text": e["text"]})
         counters = state.get("counters") or {}
+        if e.get("timed_out"):
+            return {"facts": {"timed_out": True, "close_outcome": "cancelled"}}
         return {
             "facts": {"request": request, "pending_prompt": None, "conversation": conversation},
             "counters": {
@@ -175,6 +177,8 @@ def build_handlers(
 
     def request_evidence(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         counters = state.get("counters") or {}
+        if _event(state).get("timed_out"):
+            return {"facts": {"timed_out": True, "close_outcome": "cancelled"}}
         return {
             "facts": {"evidence_provided": True, "evidence_files": _event(state).get("files", [])},
             "counters": {
@@ -264,26 +268,44 @@ def build_handlers(
     def customer_confirm(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         e = _event(state)
         counters = state.get("counters") or {}
+        f = _facts(state)
         update: dict[str, Any] = {"confirmed": bool(e.get("accept"))}
         option = e.get("option")
         if option is not None:
-            if option not in (_facts(state).get("options") or []):
+            if option not in (f.get("options") or []):
                 raise ValueError(f"customer chose an option that was not offered: {option!r}")
             update["chosen_option"] = option
+        method = e.get("refund_method")
+        if method is not None:
+            if method not in ((f.get("policy") or {}).get("refund_methods") or []):
+                raise ValueError(f"refund method not allowed by policy: {method!r}")
+            update["refund_method"] = method
+        if e.get("exchange_sku"):
+            update["request"] = {**(f.get("request") or {}), "exchange_sku": e["exchange_sku"]}
         if not update["confirmed"]:
             update["close_outcome"] = "cancelled"
         return {"facts": update, "counters": {"turns": counters.get("turns", 0) + 1}}
 
-    # --- Execution: STUB (Phase 6) — records intent; real side effects via the outbox ----
+    # --- Execution: entering these nodes queues an outbox action (runner); the relay
+    # performs it and resumes the node with an action_result event handled here.
 
     def create_exchange(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        return {"facts": {"exchange": {"status": "requested"}}}
+        e = _event(state)
+        if not e.get("ok"):
+            return {"facts": {"exchange": {"status": "failed", "error": e.get("error")}}}
+        return {"facts": {"exchange": {"status": "created", **(e.get("data") or {})}}}
 
     def create_replacement(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        return {"facts": {"replacement": {"status": "requested"}}}
+        e = _event(state)
+        if not e.get("ok"):
+            return {"facts": {"replacement": {"status": "failed", "error": e.get("error")}}}
+        return {"facts": {"replacement": {"status": "created", **(e.get("data") or {})}}}
 
     def schedule_pickup(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        return {"facts": {"pickup": {"scheduled": True}}}
+        e = _event(state)
+        if not e.get("ok"):
+            return {"facts": {"pickup": {"scheduled": False, "error": e.get("error")}}}
+        return {"facts": {"pickup": {"scheduled": True, **(e.get("data") or {})}}}
 
     def track_shipment(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         e = _event(state)
@@ -308,9 +330,13 @@ def build_handlers(
         return {"facts": update}
 
     def issue_refund(state: CaseState, node: NodeSpec) -> dict[str, Any]:
+        e = _event(state)
+        if not e.get("ok"):
+            return {"facts": {"refund_failed": e.get("error") or "refund failed"}}
         return {
             "facts": {
                 "refund_issued": True,
+                "refund": e.get("data") or {},
                 "execution_succeeded": True,
                 "close_outcome": "resolved",
             }

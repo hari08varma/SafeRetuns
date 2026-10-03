@@ -16,11 +16,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from returns_agent.adapters.base import CarrierAdapter, InventoryAdapter
 from returns_agent.audit import log as audit
 from returns_agent.db.models import DecisionRecord, ReturnCase, RiskAssessment
+from returns_agent.execution.actions import (
+    ACTION_NODES,
+    build_action,
+    compensation_intents,
+    enqueue,
+)
 from returns_agent.graph.events import validate_event
 from returns_agent.graph.lookahead import Feasibility
 from returns_agent.graph.registry import GraphRegistry
+from returns_agent.lifecycle import notify as notifications
+from returns_agent.lifecycle import timers
+from returns_agent.lifecycle.notify import notify
 
 RECURSION_LIMIT = 100
+MAX_PICKUP_ATTEMPTS = 3
 
 
 class CaseClosed(Exception):
@@ -160,6 +170,23 @@ class CaseRunner:
                 payload={"violation": violation},
             )
 
+        # Side effects are queued in this same transaction as the transition (outbox).
+        now = datetime.now(UTC)
+        if waiting_node in ACTION_NODES:
+            intent = build_action(waiting_node, facts, case.id)
+            if intent is not None:
+                enqueue(session, case.id, intent)
+        if (
+            waiting_node is not None
+            and waiting_node == spec.fallback
+            and ((facts.get("shipment") or {}).get("failed_attempts", 0) >= MAX_PICKUP_ATTEMPTS)
+        ):
+            for compensation in compensation_intents(facts, case.id):
+                enqueue(session, case.id, compensation)
+            notify(session, case.id, "pickup_failed_dropoff_available")
+        notifications.on_transition(session, case.id, new_nodes, waiting_node, spec.fallback, facts)
+        timers.on_transition(session, case.id, new_nodes, waiting_node, len(path), now)
+
         case.current_node = waiting_node or (path[-1] if path else case.current_node)
         if waiting_node is None:
             case.status, case.closed_at = "closed", datetime.now(UTC)
@@ -174,6 +201,31 @@ class CaseRunner:
             facts=dict(values.get("facts", {})),
             violations=violations[previous_violations:],
         )
+
+    def reconcile(self, case_id: uuid.UUID) -> bool:
+        """Re-queue the action for a case waiting at an execution node (idempotent). Covers a
+        crash between the checkpoint save and the outbox commit."""
+        with self._case_lock(case_id), self._sessions() as session:
+            case = session.get(ReturnCase, case_id)
+            if case is None:
+                return False
+            snapshot = self.registry.graph(case.graph_version).get_state(self._config(case_id))
+            if not snapshot.next or snapshot.next[0] not in ACTION_NODES:
+                return False
+            intent = build_action(snapshot.next[0], snapshot.values.get("facts", {}), case_id)
+            queued = intent is not None and enqueue(session, case_id, intent)
+            session.commit()
+            return queued
+
+    def timeout(self, case_id: uuid.UUID, node: str, event_type: str) -> None:
+        """Inactivity timeout: resume the waiting customer step as 'no response'."""
+        payload: dict[str, Any] = {"timed_out": True}
+        if event_type == "customer_confirm":
+            payload["accept"] = False
+        try:
+            self.dispatch(case_id, Event(event_type, payload, "system"))
+        except (StaleEvent, CaseClosed):
+            pass  # the customer acted in time
 
     @staticmethod
     def _config(case_id: uuid.UUID) -> Any:
