@@ -1,24 +1,88 @@
 {
   "version": "spike-v2",
   "start": "intake",
+  "enforce_invariants": false,
   "nodes": [
-    {"id": "intake", "kind": "llm", "task": "Understand the return request"},
-    {"id": "check_eligibility", "kind": "code", "task": "Apply return policy"},
-    {"id": "human_approval", "kind": "human", "task": "Approver decides"},
-    {"id": "issue_refund", "kind": "code", "task": "Refund via outbox"},
-    {"id": "notify_customer", "kind": "code", "task": "Send resolution notice"},
-    {"id": "close_resolved", "kind": "terminal"},
-    {"id": "close_rejected", "kind": "terminal"}
+    {
+      "id": "intake",
+      "kind": "llm",
+      "task": "Understand the return request"
+    },
+    {
+      "id": "check_eligibility",
+      "kind": "code",
+      "task": "Apply return policy"
+    },
+    {
+      "id": "human_approval",
+      "kind": "human",
+      "task": "Approver decides"
+    },
+    {
+      "id": "issue_refund",
+      "kind": "code",
+      "task": "Refund via outbox"
+    },
+    {
+      "id": "notify_customer",
+      "kind": "code",
+      "task": "Send resolution notice"
+    },
+    {
+      "id": "close_resolved",
+      "kind": "terminal"
+    },
+    {
+      "id": "close_rejected",
+      "kind": "terminal"
+    }
   ],
   "edges": [
-    {"from": "intake", "to": "check_eligibility"},
-    {"from": "check_eligibility", "to": "human_approval", "priority": 10,
-     "condition": {"==": [{"var": "facts.eligible"}, true]}},
-    {"from": "check_eligibility", "to": "close_rejected"},
-    {"from": "human_approval", "to": "issue_refund", "priority": 10,
-     "condition": {"==": [{"var": "facts.approved"}, true]}},
-    {"from": "human_approval", "to": "close_rejected"},
-    {"from": "issue_refund", "to": "notify_customer"},
-    {"from": "notify_customer", "to": "close_resolved"}
+    {
+      "from": "intake",
+      "to": "check_eligibility"
+    },
+    {
+      "from": "check_eligibility",
+      "to": "human_approval",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.eligible"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "check_eligibility",
+      "to": "close_rejected"
+    },
+    {
+      "from": "human_approval",
+      "to": "issue_refund",
+      "priority": 10,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.approved"
+          },
+          true
+        ]
+      }
+    },
+    {
+      "from": "human_approval",
+      "to": "close_rejected"
+    },
+    {
+      "from": "issue_refund",
+      "to": "notify_customer"
+    },
+    {
+      "from": "notify_customer",
+      "to": "close_resolved"
+    }
   ]
 }

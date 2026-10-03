@@ -7,14 +7,37 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 NodeKind = Literal["code", "llm", "human", "terminal"]
+WaitsFor = Literal[
+    "customer_message",
+    "customer_upload",
+    "customer_confirm",
+    "approval",
+    "carrier_event",
+    "qc_result",
+    "human_resolution",
+]
+
+
+class OnFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    retry: int = Field(default=1, ge=0, le=3)
+    then: str | None = None  # node to route to; None = the graph's fallback
 
 
 class NodeSpec(BaseModel):
+    """A node contract: what it does, what it may use, and how it fails."""
+
     model_config = ConfigDict(extra="forbid")
 
     id: str
     kind: NodeKind
     task: str = ""
+    waits_for: WaitsFor | None = None  # pauses the case until this event arrives
+    requires: list[str] = Field(default_factory=list)  # feasibility checks (look-ahead)
+    allowed_tools: list[str] = Field(default_factory=list)
+    policy_refs: list[str] = Field(default_factory=list)
+    on_failure: OnFailure = Field(default_factory=OnFailure)
 
 
 class EdgeSpec(BaseModel):
@@ -33,6 +56,8 @@ class GraphSpec(BaseModel):
 
     version: str
     start: str
+    fallback: str | None = None  # where to go when nothing else is viable (e.g. ESCALATE)
+    enforce_invariants: bool = True  # only test fixtures may switch this off
     nodes: list[NodeSpec]
     edges: list[EdgeSpec]
 
@@ -58,6 +83,11 @@ def validate_graph(spec: GraphSpec) -> None:
         problems.append("duplicate node ids")
     if spec.start not in known:
         problems.append(f"start node '{spec.start}' does not exist")
+    if spec.fallback is not None and spec.fallback not in known:
+        problems.append(f"fallback node '{spec.fallback}' does not exist")
+    for n in spec.nodes:
+        if n.on_failure.then is not None and n.on_failure.then not in known:
+            problems.append(f"node '{n.id}' on_failure targets unknown node '{n.on_failure.then}'")
     for e in spec.edges:
         for end in (e.source, e.target):
             if end not in known:

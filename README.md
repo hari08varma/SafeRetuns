@@ -10,6 +10,7 @@ a decision-intelligence layer, and bounded self-improvement. See the implementat
 | 0 — scaffold, LLM layer, LangGraph spike (GO), seed generator | Done (live DeepSeek check: run `make spike-llm`) |
 | 1 — foundations | **Done**: schema v1 (27 tables, Alembic), customer OTP + staff login (argon2, JWT access/refresh), RBAC with an enforced role matrix, PII encryption + blind indexes, hash-chained audit log, mock adapters with failure injection, seed loader, request-ID JSON logging |
 | 2 — policy engine & refunds | **Done**: versioned YAML policies (legal layer locked, merchant layer by order date), deterministic evaluation with full clause trace, refund calculator in paise (coupon pro-ration, partial returns, fees, shipping, split/COD payments), property-tested |
+| 3 — graph runtime on LangGraph | **Done**: graph `returns-v1` (25 nodes, node contracts, 8 waiting nodes), next-step choice with conditions → loop guards → hard invariants (INV-1..5, 7) → look-ahead, fallback to ESCALATE, case runner with per-case lock, typed events, Postgres checkpoints, version pinning and audited transitions. LLM/decision/execution nodes are labelled stubs until Phases 4–6 |
 
 ## Quick start (laptop with Docker)
 
@@ -36,13 +37,13 @@ services/
     db/         SQLAlchemy models, session
     security/   tokens, passwords, OTP, PII encryption
     llm/        client interface, structured output, fake + DeepSeek providers
-    graph/      graph JSON schema + validation, JSONLogic conditions, LangGraph compiler
+    graph/      graph schema, compiler, invariants, look-ahead, nodes, registry, runner, events
     policy/     policy schema, evaluation engine, refund calculator
     seed/       synthetic data generator + DB loader
   migrations/   Alembic
   spikes/       langgraph_spike.py, llm_spike.py
   tests/
-config/graphs/  versioned graph JSON (spike_v1, spike_v2)
+config/graphs/  versioned graph JSON (returns_v1; spike_v1/v2 are test fixtures)
 config/policies/ legal + merchant return policies (YAML)
 docs/           ADRs, spike reports
 apps/web/       Next.js app (Phase 10)
