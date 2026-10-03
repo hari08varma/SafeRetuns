@@ -40,6 +40,6 @@ def run() -> None:
             accounts = customer_orders.backfill(session)
             if accounts:
                 logger.info("bootstrap: orders added to %d accounts", accounts)
-        except Exception:  # never stop the API from starting because of seed data
+        except Exception as exc:  # never stop the API from starting because of seed data
             session.rollback()
-            logger.exception("bootstrap failed")
+            logger.exception("bootstrap failed: %s: %s", type(exc).__name__, exc)
