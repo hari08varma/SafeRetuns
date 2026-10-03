@@ -25,12 +25,18 @@ class Settings(BaseSettings):
     pii_encryption_key: str = ""  # Fernet key
     pii_index_key: str = ""  # HMAC key for searchable blind indexes
 
-    evidence_dir: str = "var/evidence"  # local evidence store (S3/MinIO in production)
+    evidence_dir: str = "var/evidence"
+    # Run the worker loop inside the API process (single-service hosting, e.g. a demo).
+    embedded_worker: bool = False  # local evidence store (S3/MinIO in production)
 
     webhook_secret: str = ""  # HMAC secret shared with carrier/payment providers
     webhook_tolerance_s: int = 300
 
+    # Customer sign-in with Firebase Phone Auth (Firebase sends the SMS; we verify its token).
+    firebase_project_id: str = ""
     otp_ttl_s: int = 300
+    # Development only: return the OTP in the API response (no SMS gateway). Never in production.
+    dev_otp_echo: bool = False
     otp_max_attempts: int = 5
     otp_max_requests_per_window: int = 3
     otp_window_s: int = 900

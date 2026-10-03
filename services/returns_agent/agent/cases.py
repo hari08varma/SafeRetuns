@@ -2,7 +2,7 @@
 message. Every customer and agent message is stored (with a redacted copy) and audited."""
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -56,6 +56,7 @@ class CaseView:
     reply: str
     options: list[str]
     refund_total_minor: int | None
+    refund_methods: list[str] = field(default_factory=list)  # allowed by policy, for the offer
 
 
 def _pii(session: Session, customer: Customer) -> dict[str, str]:
@@ -115,13 +116,18 @@ def linked_risky_accounts(session: Session, customer: Customer, since: datetime)
     addresses = select(Address.address_index).where(
         Address.customer_id == customer.id, Address.address_index.is_not(None)
     )
-    linked_ids = set(
-        session.scalars(
-            select(Customer.id).where(
-                Customer.id != customer.id, Customer.email_index == customer.email_index
+    same_email = (
+        set(
+            session.scalars(
+                select(Customer.id).where(
+                    Customer.id != customer.id, Customer.email_index == customer.email_index
+                )
             )
         )
-    ) | set(
+        if customer.email_index
+        else set()
+    )
+    linked_ids = same_email | set(
         session.scalars(
             select(Address.customer_id).where(
                 Address.customer_id != customer.id, Address.address_index.in_(addresses)
@@ -324,6 +330,34 @@ class CaseService:
         )
         return self._respond(session, result)
 
+    def view(self, session: Session, customer_id: uuid.UUID, case_id: uuid.UUID) -> CaseView:
+        """Where the case stands now (for a page reload), with the last agent message."""
+        self._owned(session, customer_id, case_id)
+        case = session.get(ReturnCase, case_id)
+        assert case is not None
+        facts = self.runner.facts(case_id)
+        waiting = None
+        if case.status != "closed":
+            waiting = (
+                self.runner.registry.spec(case.graph_version).node(case.current_node).waits_for
+            )
+        last = session.scalars(
+            select(Message.content)
+            .where(Message.case_id == case_id, Message.role == "agent")
+            .order_by(Message.created_at.desc())
+        ).first()
+        quote = facts.get("refund_quote") or {}
+        return CaseView(
+            case_id=str(case_id),
+            status=case.status,
+            current_node=case.current_node,
+            waiting_for=waiting,
+            reply=last or "",
+            options=list(facts.get("options") or []),
+            refund_total_minor=quote.get("total_minor"),
+            refund_methods=list((facts.get("policy") or {}).get("refund_methods") or []),
+        )
+
     def staff_event(self, session: Session, case_id: uuid.UUID, event: Event) -> CaseView:
         """A person's decision (approval, resolution) moves the case; the customer is told."""
         result = self.runner.dispatch(case_id, event)
@@ -407,6 +441,7 @@ class CaseService:
             reply=answer.text,
             options=list(result.facts.get("options") or []),
             refund_total_minor=quote.get("total_minor"),
+            refund_methods=list((result.facts.get("policy") or {}).get("refund_methods") or []),
         )
 
     @staticmethod

@@ -56,7 +56,7 @@ class Customer(Entity):
     phone_enc: Mapped[str] = mapped_column(Text)
     phone_index: Mapped[str] = mapped_column(String(64), unique=True)  # blind index
     email_enc: Mapped[str] = mapped_column(Text)
-    email_index: Mapped[str] = mapped_column(String(64), index=True)
+    email_index: Mapped[str | None] = mapped_column(String(64), index=True)  # None until given
     tier: Mapped[str] = mapped_column(String(16), default="standard")
     account_age_days: Mapped[int] = mapped_column(default=0)
     risk_profile: Mapped[dict[str, Any]] = mapped_column(default=dict)

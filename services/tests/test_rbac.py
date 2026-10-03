@@ -16,6 +16,7 @@ from tests.conftest import needs_db
 PUBLIC = {
     "/healthz",
     "/api/v1/auth/otp/request",
+    "/api/v1/auth/firebase",
     "/api/v1/auth/otp/verify",
     "/api/v1/auth/staff/login",
     "/api/v1/auth/refresh",
@@ -26,6 +27,8 @@ PUBLIC = {
 
 EXPECTED: dict[tuple[str, str], set[Role]] = {
     ("GET", "/api/v1/me/orders"): {Role.CUSTOMER},
+    ("GET", "/api/v1/me/profile"): {Role.CUSTOMER},
+    ("PUT", "/api/v1/me/profile"): {Role.CUSTOMER},
     ("GET", "/api/v1/console/cases"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
     ("GET", "/api/v1/admin/users"): {Role.ADMIN},
     ("POST", "/api/v1/admin/users"): {Role.ADMIN},
@@ -39,6 +42,17 @@ EXPECTED: dict[tuple[str, str], set[Role]] = {
     ("POST", "/api/v1/console/cases/{case_id}/qc"): {Role.QC_OPERATOR, Role.ADMIN},
     ("POST", "/api/v1/cases/{case_id}/evidence"): {Role.CUSTOMER},
     ("POST", "/api/v1/cases/{case_id}/review"): {Role.CUSTOMER},
+    ("GET", "/api/v1/cases"): {Role.CUSTOMER},
+    ("GET", "/api/v1/cases/{case_id}"): {Role.CUSTOMER},
+    ("GET", "/api/v1/console/evidence/{evidence_id}/thumbnail"): {
+        Role.AGENT,
+        Role.APPROVER,
+        Role.ADMIN,
+    },
+    ("GET", "/api/v1/console/reason-codes"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
+    ("GET", "/api/v1/admin/config"): {Role.ADMIN},
+    ("POST", "/api/v1/admin/test-orders"): {Role.ADMIN},
+    ("GET", "/api/v1/admin/products"): {Role.ADMIN},
     ("GET", "/api/v1/console/queues/{queue}"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
     ("POST", "/api/v1/console/queue-items/{item_id}/claim"): {
         Role.AGENT,
@@ -131,6 +145,7 @@ def test_role_matrix(
     url = (
         path.replace("{case_id}", str(uuid.uuid4()))
         .replace("{item_id}", str(uuid.uuid4()))
+        .replace("{evidence_id}", str(uuid.uuid4()))
         .replace("{queue}", "approval")
     )
     resp = client.request(method, url, json=body, headers={"Authorization": f"Bearer {token}"})

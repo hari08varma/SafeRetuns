@@ -1,21 +1,45 @@
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from returns_agent.agent.cases import CaseNotFound, CaseService, CaseView, ReviewNotAvailable
+from returns_agent.analytics import summary as analytics
 from returns_agent.api.deps import Adapters, get_adapters, get_cases, require
 from returns_agent.audit import log as audit
-from returns_agent.config import get_settings
-from returns_agent.db.models import Approval, Customer, Order, QueueItem, ReturnCase, StaffUser
+from returns_agent.config import config_dir, get_settings
+from returns_agent.db.models import (
+    Address,
+    Approval,
+    Customer,
+    Evidence,
+    Order,
+    OrderItem,
+    Product,
+    QueueItem,
+    ReturnCase,
+    ReturnItem,
+    StaffUser,
+)
 from returns_agent.db.session import get_session
+from returns_agent.decision.config import load_decision_config
 from returns_agent.evidence.intake import MAX_BYTES, MAX_FILES, EvidenceRejected
 from returns_agent.evidence.service import Upload
 from returns_agent.execution.webhooks import (
@@ -30,7 +54,10 @@ from returns_agent.graph.events import InvalidEvent
 from returns_agent.graph.runner import CaseClosed, Event, StaleEvent
 from returns_agent.hitl import approvals, goodwill, handoff, queues
 from returns_agent.lifecycle.timeline import build_timeline
+from returns_agent.policy.schema import load_policies
+from returns_agent.security.firebase import InvalidFirebaseToken, verify_id_token
 from returns_agent.security.otp import InvalidOtp, OtpRateLimited, request_otp, verify_otp
+from returns_agent.security.pii import address_index, blind_index, decrypt, encrypt
 from returns_agent.security.tokens import (
     STAFF_ROLES,
     InvalidToken,
@@ -84,10 +111,12 @@ def otp_request(
     body: OtpRequest, db: DB, adapters: Annotated[Adapters, Depends(get_adapters)]
 ) -> dict[str, str]:
     try:
-        request_otp(db, body.phone, adapters.notification)
+        code = request_otp(db, body.phone, adapters.notification)
     except OtpRateLimited as exc:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many codes requested") from exc
     db.commit()
+    if get_settings().dev_otp_echo and code:  # development demo only (no SMS gateway)
+        return {"status": "sent", "dev_code": code}
     return {"status": "sent"}
 
 
@@ -101,6 +130,111 @@ def otp_verify(body: OtpVerify, db: DB) -> TokenPair:
     audit.append(db, actor_type="customer", actor_id=str(customer_id), action="login.otp")
     db.commit()
     return _tokens(Principal(str(customer_id), Role.CUSTOMER))
+
+
+class FirebaseLogin(BaseModel):
+    id_token: str = Field(min_length=20, max_length=4096)
+
+
+class CustomerSession(TokenPair):
+    profile_complete: bool
+
+
+def _profile_complete(db: Session, customer: Customer) -> bool:
+    has_address = db.scalar(select(Address.id).where(Address.customer_id == customer.id))
+    return bool(decrypt(customer.name_enc)) and has_address is not None
+
+
+@router.post("/auth/firebase")
+def firebase_login(body: FirebaseLogin, db: DB) -> CustomerSession:
+    """Sign in or sign up with a phone number verified by Firebase Phone Auth."""
+    try:
+        identity = verify_id_token(body.id_token)
+    except InvalidFirebaseToken as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    index = blind_index(identity.phone)
+    customer = db.scalar(select(Customer).where(Customer.phone_index == index))
+    action = "login.firebase"
+    if customer is None:  # first sign-in with this number: create the account
+        customer = Customer(
+            external_id=f"CUST-{uuid.uuid4().hex[:12].upper()}",
+            name_enc=encrypt(""),
+            phone_enc=encrypt(identity.phone),
+            phone_index=index,
+            email_enc=encrypt(""),
+            email_index=None,
+            account_age_days=0,
+        )
+        db.add(customer)
+        db.flush()
+        action = "signup.firebase"
+    audit.append(db, actor_type="customer", actor_id=str(customer.id), action=action)
+    complete = _profile_complete(db, customer)
+    db.commit()
+    tokens = _tokens(Principal(str(customer.id), Role.CUSTOMER))
+    return CustomerSession(**tokens.model_dump(), profile_complete=complete)
+
+
+class Profile(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    email: EmailStr | None = None
+    address: str = Field(min_length=5, max_length=300)
+    city: str = Field(min_length=2, max_length=64)
+    pincode: str = Field(pattern=r"^[1-9][0-9]{5}$")
+
+
+class ProfileOut(BaseModel):
+    name: str
+    phone: str
+    email: str | None
+    address: str | None
+    city: str | None
+    pincode: str | None
+    profile_complete: bool
+
+
+def _profile(db: Session, customer: Customer) -> ProfileOut:
+    address = db.scalars(select(Address).where(Address.customer_id == customer.id)).first()
+    return ProfileOut(
+        name=decrypt(customer.name_enc),
+        phone=decrypt(customer.phone_enc),
+        email=decrypt(customer.email_enc) or None,
+        address=decrypt(address.address_enc) if address else None,
+        city=address.city if address else None,
+        pincode=address.pincode if address else None,
+        profile_complete=_profile_complete(db, customer),
+    )
+
+
+@router.get("/me/profile")
+def get_profile(db: DB, principal: Annotated[Principal, require(Role.CUSTOMER)]) -> ProfileOut:
+    customer = db.get(Customer, uuid.UUID(principal.subject))
+    if customer is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    return _profile(db, customer)
+
+
+@router.put("/me/profile")
+def put_profile(
+    body: Profile, db: DB, principal: Annotated[Principal, require(Role.CUSTOMER)]
+) -> ProfileOut:
+    customer = db.get(Customer, uuid.UUID(principal.subject))
+    if customer is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    customer.name_enc = encrypt(body.name.strip())
+    if body.email:
+        customer.email_enc = encrypt(body.email.lower())
+        customer.email_index = blind_index(body.email.lower())
+    address = db.scalars(select(Address).where(Address.customer_id == customer.id)).first()
+    if address is None:
+        address = Address(customer_id=customer.id, city="", pincode="", address_enc="")
+        db.add(address)
+    address.city, address.pincode = body.city.strip(), body.pincode
+    full = f"{body.address.strip()}, {body.city.strip()} {body.pincode}"
+    address.address_enc, address.address_index = encrypt(full), address_index(full)
+    audit.append(db, actor_type="customer", actor_id=str(customer.id), action="profile.updated")
+    db.commit()
+    return _profile(db, customer)
 
 
 @router.post("/auth/staff/login")
@@ -129,11 +263,24 @@ def refresh(body: RefreshRequest) -> TokenPair:
 # --- Customer ----------------------------------------------------------------------------
 
 
+class OrderItemOut(BaseModel):
+    item_id: str
+    sku: str
+    title: str
+    qty: int
+    unit_price_minor: int
+    final_sale: bool
+
+
 class OrderSummary(BaseModel):
     order_id: str
     status: str
     total_minor: int
     item_count: int
+    payment_method: str
+    placed_at: datetime
+    delivered_at: datetime | None
+    items: list[OrderItemOut]
 
 
 @router.get("/me/orders")
@@ -146,12 +293,27 @@ def my_orders(
         .where(Order.customer_id == uuid.UUID(principal.subject))  # own orders only
         .order_by(Order.placed_at.desc())
     ).all()
+    titles = dict(db.execute(select(Product.sku, Product.title)).tuples().all())
     return [
         OrderSummary(
             order_id=o.external_id,
             status=o.status,
             total_minor=o.total_minor,
             item_count=len(o.items),
+            payment_method=o.payment_method,
+            placed_at=o.placed_at,
+            delivered_at=o.delivered_at,
+            items=[
+                OrderItemOut(
+                    item_id=i.external_id,
+                    sku=i.sku,
+                    title=titles.get(i.sku, i.sku),
+                    qty=i.qty,
+                    unit_price_minor=i.unit_price_minor,
+                    final_sale=i.final_sale,
+                )
+                for i in o.items
+            ],
         )
         for o in orders
     ]
@@ -165,16 +327,40 @@ class CaseSummary(BaseModel):
     status: str
     current_node: str
     route: str | None
+    priority: int = 0
+    order_id: str | None = None
+    created_at: datetime | None = None
+    sla_due_at: datetime | None = None
 
 
 @router.get("/console/cases")
 def console_cases(
-    db: DB, _: Annotated[Principal, require(Role.AGENT, Role.APPROVER, Role.ADMIN)]
+    db: DB,
+    _: Annotated[Principal, require(Role.AGENT, Role.APPROVER, Role.ADMIN)],
+    status_: Annotated[str | None, Query(alias="status")] = None,
+    route: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[CaseSummary]:
-    cases = db.scalars(select(ReturnCase).order_by(ReturnCase.created_at.desc()).limit(100)).all()
+    query = select(ReturnCase, Order.external_id).join(Order, Order.id == ReturnCase.order_id)
+    if status_:
+        query = query.where(ReturnCase.status == status_)
+    if route:
+        query = query.where(ReturnCase.route == route)
+    rows = db.execute(
+        query.order_by(ReturnCase.priority.desc(), ReturnCase.created_at.desc()).limit(limit)
+    ).all()
     return [
-        CaseSummary(case_id=str(c.id), status=c.status, current_node=c.current_node, route=c.route)
-        for c in cases
+        CaseSummary(
+            case_id=str(c.id),
+            status=c.status,
+            current_node=c.current_node,
+            route=c.route,
+            priority=c.priority,
+            order_id=order_ref,
+            created_at=c.created_at,
+            sla_due_at=c.sla_due_at,
+        )
+        for c, order_ref in rows
     ]
 
 
@@ -239,12 +425,11 @@ def create_staff(
 
 @router.get("/analytics/summary")
 def analytics_summary(
-    db: DB, _: Annotated[Principal, require(Role.ANALYST, Role.ADMIN)]
-) -> dict[str, int]:
-    return {
-        "orders": db.scalar(select(func.count()).select_from(Order)) or 0,
-        "cases": db.scalar(select(func.count()).select_from(ReturnCase)) or 0,
-    }
+    db: DB,
+    _: Annotated[Principal, require(Role.ANALYST, Role.ADMIN)],
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> dict[str, Any]:
+    return analytics.summary(db, days)
 
 
 # --- Customer cases ------------------------------------------------------------------------
@@ -319,6 +504,43 @@ def open_case(principal: CustomerOnly, body: OpenCase, db: DB, cases: Cases) -> 
             },
         )
     )
+
+
+class MyCase(BaseModel):
+    case_id: str
+    status: str
+    current_node: str
+    order_id: str
+    sku: str | None
+    created_at: datetime
+
+
+@router.get("/cases")
+def my_cases(principal: CustomerOnly, db: DB) -> list[MyCase]:
+    rows = db.execute(
+        select(ReturnCase, Order.external_id, OrderItem.sku)
+        .join(Order, Order.id == ReturnCase.order_id)
+        .outerjoin(ReturnItem, ReturnItem.case_id == ReturnCase.id)
+        .outerjoin(OrderItem, OrderItem.id == ReturnItem.order_item_id)
+        .where(ReturnCase.customer_id == uuid.UUID(principal.subject))  # own cases only
+        .order_by(ReturnCase.created_at.desc())
+    ).all()
+    return [
+        MyCase(
+            case_id=str(c.id),
+            status=c.status,
+            current_node=c.current_node,
+            order_id=order_ref,
+            sku=sku,
+            created_at=c.created_at,
+        )
+        for c, order_ref, sku in rows
+    ]
+
+
+@router.get("/cases/{case_id}")
+def case_view(principal: CustomerOnly, case_id: uuid.UUID, db: DB, cases: Cases) -> CaseView:
+    return _case_call(lambda: cases.view(db, uuid.UUID(principal.subject), case_id))
 
 
 @router.post("/cases/{case_id}/messages")
@@ -737,3 +959,119 @@ def request_review(
     except ReviewNotAvailable as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"status": "review requested"}
+
+
+@router.get("/console/evidence/{evidence_id}/thumbnail")
+def evidence_thumbnail(
+    principal: StaffOps, evidence_id: uuid.UUID, db: DB, cases: Cases
+) -> Response:
+    row = db.get(Evidence, evidence_id)
+    if row is None or not row.thumb_uri:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "thumbnail not found")
+    data = cases.store.get(row.thumb_uri)  # sanitised copy: no metadata, re-encoded
+    return Response(
+        data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"}
+    )
+
+
+@router.get("/admin/config")
+def admin_config(_: Annotated[Principal, require(Role.ADMIN)], cases: Cases) -> dict[str, Any]:
+    """Read-only view of what drives decisions: policies, decision settings and the graph."""
+    legal, merchant = load_policies(config_dir() / "policies")
+    spec = cases.runner.registry.spec(get_settings().graph_active_version)
+    return {
+        "policies": [
+            {
+                "version": doc.version,
+                "layer": doc.layer,
+                "effective_from": doc.effective_from,
+                "rules": [{"clause_id": r.clause_id, "text": r.text} for r in doc.rules],
+            }
+            for doc in [*legal, *merchant]
+        ],
+        "decision": load_decision_config(config_dir() / "decision.yaml").model_dump(),
+        "graph": {
+            "version": spec.version,
+            "nodes": [
+                {"id": n.id, "kind": n.kind, "task": n.task, "waits_for": n.waits_for}
+                for n in spec.nodes
+            ],
+            "edges": [{"from": e.source, "to": e.target} for e in spec.edges],
+        },
+    }
+
+
+@router.get("/console/reason-codes")
+def reason_codes(principal: StaffOps) -> dict[str, list[str]]:
+    """Single source of truth for the console's reason-code pickers."""
+    return {
+        **{k: sorted(v) for k, v in approvals.REASON_CODES.items()},
+        "resolve": sorted(RESOLUTION_REASONS),
+        "goodwill": sorted(goodwill.REASON_CODES),
+        "review": sorted(REVIEW_REASONS),
+    }
+
+
+class TestOrderIn(BaseModel):
+    phone: str = Field(min_length=10, max_length=20)
+    sku: str = Field(min_length=3, max_length=64)
+    qty: int = Field(default=1, ge=1, le=10)
+    days_since_delivery: int = Field(default=3, ge=0, le=365)
+    payment_method: Literal["upi", "card", "wallet", "cod"] = "upi"
+    final_sale: bool = False
+
+
+@router.post("/admin/test-orders", status_code=status.HTTP_201_CREATED)
+def create_test_order(
+    body: TestOrderIn, db: DB, admin: Annotated[Principal, require(Role.ADMIN)]
+) -> dict[str, str]:
+    """Demo helper: a delivered order for a signed-up customer (real orders come from the
+    store's order system)."""
+    digits = "".join(c for c in body.phone if c.isdigit())
+    phone = f"+91{digits}" if len(digits) == 10 else f"+{digits}"
+    customer = db.scalar(select(Customer).where(Customer.phone_index == blind_index(phone)))
+    if customer is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no customer has signed up with that number")
+    product = db.scalar(select(Product).where(Product.sku == body.sku))
+    if product is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"unknown SKU {body.sku}")
+    now = datetime.now(UTC)
+    ref = f"TEST-{uuid.uuid4().hex[:8].upper()}"
+    order = Order(
+        external_id=ref,
+        customer_id=customer.id,
+        placed_at=now - timedelta(days=body.days_since_delivery + 3),
+        delivered_at=now - timedelta(days=body.days_since_delivery),
+        status="delivered",
+        payment_method=body.payment_method,
+        coupon_minor=0,
+        total_minor=product.price_minor * body.qty,
+    )
+    order.items = [
+        OrderItem(
+            external_id=f"{ref}-1",
+            sku=product.sku,
+            qty=body.qty,
+            unit_price_minor=product.price_minor,
+            discount_alloc_minor=0,
+            final_sale=body.final_sale,
+        )
+    ]
+    db.add(order)
+    audit.append(
+        db,
+        actor_type="staff",
+        actor_id=admin.subject,
+        action="order.test_created",
+        payload={"order": ref, "sku": product.sku},
+    )
+    db.commit()
+    return {"order_id": ref}
+
+
+@router.get("/admin/products")
+def list_products(db: DB, _: Annotated[Principal, require(Role.ADMIN)]) -> list[dict[str, Any]]:
+    return [
+        {"sku": p.sku, "title": p.title, "category": p.category, "price_minor": p.price_minor}
+        for p in db.scalars(select(Product).order_by(Product.sku))
+    ]

@@ -28,9 +28,10 @@ def _code_hash(phone_index: str, code: str) -> str:
     return hmac.new(key, f"{phone_index}:{code}".encode(), hashlib.sha256).hexdigest()
 
 
-def request_otp(session: Session, phone: str, notifier: NotificationAdapter) -> None:
+def request_otp(session: Session, phone: str, notifier: NotificationAdapter) -> str | None:
     """Sends a code if the phone belongs to a customer. Same response either way,
-    so the endpoint cannot be used to discover which numbers are registered."""
+    so the endpoint cannot be used to discover which numbers are registered.
+    Returns the code that was sent (for the development echo only), else None."""
     settings = get_settings()
     idx = blind_index(phone)
     now = datetime.now(UTC)
@@ -57,6 +58,8 @@ def request_otp(session: Session, phone: str, notifier: NotificationAdapter) -> 
     )
     if session.scalar(select(Customer.id).where(Customer.phone_index == idx)):
         notifier.send("sms", phone, "otp_login", {"code": code})
+        return code
+    return None
 
 
 def verify_otp(session: Session, phone: str, code: str) -> uuid.UUID:

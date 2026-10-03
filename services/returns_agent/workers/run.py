@@ -6,7 +6,7 @@ Several workers can run at once: rows are claimed with SELECT ... FOR UPDATE SKI
 
 import logging
 import signal
-import time
+import threading
 from datetime import UTC, datetime
 from types import FrameType
 
@@ -46,34 +46,50 @@ def run_once(runtime: Runtime, sessions: sessionmaker[Session]) -> int:
     return work
 
 
+def loop(runtime: Runtime, sessions: sessionmaker[Session], stop: threading.Event) -> None:
+    """The worker loop: relay, timers, queue SLAs, periodic reconciliation, until `stop`."""
+    loops = 0
+    while not stop.is_set():
+        try:
+            work = run_once(runtime, sessions)
+            if loops % RECONCILE_EVERY == 0:
+                work += reconcile_all(runtime, sessions)
+        except Exception:  # keep the worker alive; each unit of work is retried
+            logger.exception("worker loop failed")
+            work = 0
+        loops += 1
+        if not work:
+            stop.wait(POLL_INTERVAL_S)
+
+
+def start_embedded(runtime: Runtime) -> tuple[threading.Thread, threading.Event]:
+    """Runs the loop in a background thread of the API process."""
+    stop = threading.Event()
+    sessions = sessionmaker(bind=get_engine(), expire_on_commit=False)
+    thread = threading.Thread(
+        target=loop, args=(runtime, sessions, stop), name="embedded-worker", daemon=True
+    )
+    thread.start()
+    logger.info("embedded worker started")
+    return thread, stop
+
+
 def main() -> None:
     configure_logging()
     settings = get_settings()
-    stopping = False
+    stop = threading.Event()
 
-    def stop(signum: int, frame: FrameType | None) -> None:
-        nonlocal stopping
-        stopping = True
+    def on_signal(signum: int, frame: FrameType | None) -> None:
+        stop.set()
 
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
     sessions = sessionmaker(bind=get_engine(), expire_on_commit=False)
     with PostgresSaver.from_conn_string(settings.database_url) as saver:
         saver.setup()
         runtime = build_runtime(settings, saver, mock_adapters())
         logger.info("worker started")
-        loops = 0
-        while not stopping:
-            try:
-                work = run_once(runtime, sessions)
-                if loops % RECONCILE_EVERY == 0:
-                    work += reconcile_all(runtime, sessions)
-            except Exception:  # keep the worker alive; each unit of work is retried
-                logger.exception("worker loop failed")
-                work = 0
-            loops += 1
-            if not work:
-                time.sleep(POLL_INTERVAL_S)
+        loop(runtime, sessions, stop)
         logger.info("worker stopped")
 
 

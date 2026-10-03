@@ -8,12 +8,11 @@ from returns_agent.config import get_settings
 
 
 def sqlalchemy_url(url: str) -> str:
-    """Use the psycopg 3 driver for plain postgresql:// URLs."""
-    return (
-        url.replace("postgresql://", "postgresql+psycopg://", 1)
-        if url.startswith("postgresql://")
-        else url
-    )
+    """Use the psycopg 3 driver for plain postgresql:// (or hosted postgres://) URLs."""
+    for scheme in ("postgresql://", "postgres://"):
+        if url.startswith(scheme):
+            return "postgresql+psycopg://" + url[len(scheme) :]
+    return url
 
 
 @lru_cache

@@ -3,7 +3,7 @@ TEST_DB_URL ?= postgresql://returns:returns@localhost:5432/returns_test
 STAFF_PASSWORD ?= change-me-please
 RUN = uv run --directory services
 
-.PHONY: install up down migrate seed-db api lint typecheck test test-all spike-graph spike-llm agent-smoke worker eval-smoke eval-full seed check
+.PHONY: install up down migrate seed-db api lint typecheck test test-all spike-graph spike-llm agent-smoke worker eval-smoke eval-full seed seed-demo create-admin web check
 
 install:
 	cd services && uv sync
@@ -51,9 +51,20 @@ eval-smoke:    ## eval suite without a model (scripted customers); report in eva
 	DATABASE_URL=$(TEST_DB_URL) $(RUN) alembic upgrade head
 	DATABASE_URL=$(TEST_DB_URL) $(RUN) python -m returns_agent.evals.run --mode smoke --strict --check-bars
 
+
 eval-full:     ## DeepSeek agent + LLM customers, 4 trials (needs LLM_PROVIDER=deepseek + key in services/.env)
 	DATABASE_URL=$(TEST_DB_URL) $(RUN) alembic upgrade head
 	DATABASE_URL=$(TEST_DB_URL) $(RUN) python -m returns_agent.evals.run --mode full --check-bars
+
+create-admin:  ## first admin for a real setup: make create-admin EMAIL=owner@yourstore.in
+	DATABASE_URL=$(DB_URL) $(RUN) python -m returns_agent.seed.admin --email $(EMAIL)
+
+seed-demo:     ## demo customers Priya (+91 90000 00001) and Rahul (+91 90000 00002), after seed-db
+	DATABASE_URL=$(DB_URL) $(RUN) python -m returns_agent.seed.demo --staff-password $(STAFF_PASSWORD)
+
+web:           ## web app on :3000 (API on :8000); set DEV_OTP_ECHO=true in services/.env to see OTPs
+	cd apps/web && npm install && npm run dev
+
 
 seed:
 	$(RUN) python -m returns_agent.seed.generator --out ../seed.json
