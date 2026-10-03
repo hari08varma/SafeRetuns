@@ -68,7 +68,8 @@ def decision_view(facts: dict[str, Any], waiting_node: str | None) -> dict[str, 
         "amounts_minor": [quote["total_minor"]] if quote and money else [],
         "timeline_days": [],
         "missing_details": facts.get("missing_slots") or [],
-        "evidence_needed": policy.get("required_evidence", []),
+        "evidence_needed": (facts.get("evidence") or {}).get("missing_views")
+        or policy.get("required_evidence", []),
     }
     if situation == "closed":
         view["outcome"] = facts.get("close_outcome")
@@ -88,6 +89,9 @@ def template(view: dict[str, Any]) -> str:
         asks = [SLOT_QUESTIONS.get(d, d.replace("_", " ")) for d in view["missing_details"]]
         return f"Could you tell me {' and '.join(asks)}?"
     if s == "evidence":
+        needed = [v for v in view["evidence_needed"] if v != "photo"]
+        if needed:  # a targeted re-request: exactly the views the assessment is missing
+            return f"Thanks for the photos. Could you also upload: {'; '.join(needed)}?"
         return "Please upload a photo of the item that shows the problem."
     if s == "offer":
         choices = " or ".join(OPTION_LABELS.get(o, o) for o in view["options"])

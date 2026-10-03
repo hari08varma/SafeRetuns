@@ -17,7 +17,10 @@ class CustomerMessage(_Event):
 
 
 class CustomerUpload(_Event):
-    files: list[str] = Field(default_factory=list)
+    files: list[str] = Field(default_factory=list)  # evidence ids
+    checks: list[dict[str, Any]] = Field(default_factory=list)  # deterministic, per file
+    vision: dict[str, Any] | None = None
+    prompt_refs: list[str] = Field(default_factory=list)
     timed_out: bool = False
 
     @model_validator(mode="after")

@@ -10,11 +10,15 @@ from sqlalchemy.orm import Session
 
 from returns_agent.db.models import Address, Customer, Order, OrderItem, Product, StaffUser
 from returns_agent.db.session import get_engine
-from returns_agent.security.pii import blind_index, encrypt
+from returns_agent.security.pii import address_index, blind_index, encrypt
 from returns_agent.security.tokens import STAFF_ROLES, hash_password
 from returns_agent.seed.generator import SeedData, generate
 
 AUTHORITY_LIMITS = {"agent": 200_000, "approver": 2_500_000, "admin": 2_500_000}
+
+
+def _address(customer_id: str, city: str, pincode: str) -> str:
+    return f"House {customer_id.rsplit('-', 1)[-1]}, {city} {pincode}"
 
 
 def load(session: Session, data: SeedData, staff_password: str | None = None) -> bool:
@@ -54,7 +58,8 @@ def load(session: Session, data: SeedData, staff_password: str | None = None) ->
                 customer_id=customers[c.id].id,
                 city=c.city,
                 pincode=c.pincode,
-                address_enc=encrypt(f"{c.city} {c.pincode}"),
+                address_enc=encrypt(_address(c.id, c.city, c.pincode)),
+                address_index=address_index(_address(c.id, c.city, c.pincode)),
             )
         )
     for o in data.orders:

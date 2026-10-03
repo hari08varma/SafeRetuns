@@ -9,6 +9,7 @@ from returns_agent.adapters.bundle import Adapters
 from returns_agent.agent.cases import CaseService
 from returns_agent.config import Settings, config_dir
 from returns_agent.db.session import get_engine
+from returns_agent.evidence.store import LocalEvidenceStore
 from returns_agent.execution.relay import Relay
 from returns_agent.graph.nodes import build_handlers
 from returns_agent.graph.registry import GraphRegistry
@@ -34,5 +35,7 @@ def build_runtime(settings: Settings, saver: PostgresSaver, adapters: Adapters) 
     )
     runner = CaseRunner(registry, get_engine())
     return Runtime(
-        runner=runner, cases=CaseService(runner, llm), relay=Relay(get_engine(), runner, adapters)
+        runner=runner,
+        cases=CaseService(runner, llm, LocalEvidenceStore(settings.evidence_dir)),
+        relay=Relay(get_engine(), runner, adapters),
     )

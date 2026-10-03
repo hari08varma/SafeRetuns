@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from returns_agent.agent.context import redactor_for
 from returns_agent.agent.respond import reply
 from returns_agent.audit import log as audit
+from returns_agent.config import get_settings
 from returns_agent.db.models import (
     Address,
     Customer,
@@ -25,7 +26,9 @@ from returns_agent.db.models import (
     ReturnCase,
     ReturnItem,
 )
-from returns_agent.graph.runner import CaseRunner, Event, RunResult
+from returns_agent.evidence.service import Upload, ingest, vision_assessment
+from returns_agent.evidence.store import EvidenceStore, LocalEvidenceStore
+from returns_agent.graph.runner import CaseRunner, Event, RunResult, StaleEvent
 from returns_agent.lifecycle import timers
 from returns_agent.llm.client import LLMClient
 from returns_agent.security.pii import decrypt
@@ -74,11 +77,61 @@ def customer_stats(
         .select_from(Order)
         .where(Order.customer_id == customer.id, Order.placed_at >= since)
     )
+    damage = (
+        select(func.count())
+        .select_from(ReturnItem)
+        .join(ReturnCase, ReturnCase.id == ReturnItem.case_id)
+        .where(
+            ReturnCase.customer_id == customer.id,
+            ReturnCase.created_at >= since,
+            ReturnItem.reason_category.in_(("damaged", "defective")),
+        )
+    )
+    if exclude_case is not None:
+        damage = damage.where(ReturnCase.id != exclude_case)
     return {
         "returns_90d": session.scalar(returns) or 0,
         "orders_90d": session.scalar(orders) or 0,
         "account_age_days": customer.account_age_days,
+        "damage_claims_90d": session.scalar(damage) or 0,
+        "linked_risky_accounts": linked_risky_accounts(session, customer, since),
+        "confirmed_fraud": bool((customer.risk_profile or {}).get("confirmed_fraud")),
     }
+
+
+LINKED_RETURNS = 2  # a linked account counts as risky from this many returns in 90 days
+
+
+def linked_risky_accounts(session: Session, customer: Customer, since: datetime) -> int:
+    """Other accounts sharing this customer's email or a delivery address (blind indexes)
+    that return a lot or had fraud confirmed. Matching never decrypts anything."""
+    addresses = select(Address.address_index).where(
+        Address.customer_id == customer.id, Address.address_index.is_not(None)
+    )
+    linked_ids = set(
+        session.scalars(
+            select(Customer.id).where(
+                Customer.id != customer.id, Customer.email_index == customer.email_index
+            )
+        )
+    ) | set(
+        session.scalars(
+            select(Address.customer_id).where(
+                Address.customer_id != customer.id, Address.address_index.in_(addresses)
+            )
+        )
+    )
+    risky = 0
+    for linked in linked_ids:
+        other = session.get(Customer, linked)
+        recent = session.scalar(
+            select(func.count())
+            .select_from(ReturnCase)
+            .where(ReturnCase.customer_id == linked, ReturnCase.created_at >= since)
+        )
+        if (recent or 0) >= LINKED_RETURNS or (other and other.risk_profile.get("confirmed_fraud")):
+            risky += 1
+    return risky
 
 
 def returned_qty(
@@ -151,9 +204,12 @@ def build_case_facts(
 
 
 class CaseService:
-    def __init__(self, runner: CaseRunner, llm: LLMClient | None) -> None:
+    def __init__(
+        self, runner: CaseRunner, llm: LLMClient | None, store: EvidenceStore | None = None
+    ) -> None:
         self.runner = runner
         self.llm = llm
+        self.store = store or LocalEvidenceStore(get_settings().evidence_dir)
 
     def open(
         self,
@@ -231,12 +287,33 @@ class CaseService:
         return self._respond(session, result)
 
     def upload(
-        self, session: Session, customer_id: uuid.UUID, case_id: uuid.UUID, files: list[str]
+        self, session: Session, customer_id: uuid.UUID, case_id: uuid.UUID, uploads: list[Upload]
     ) -> CaseView:
-        """Evidence uploaded by the customer (file references; storage arrives in Phase 8)."""
+        """Evidence photos: validated, checked and stored, then assessed and handed to the case."""
         self._owned(session, customer_id, case_id)
+        case = session.get(ReturnCase, case_id)
+        assert case is not None
+        spec = self.runner.registry.spec(case.graph_version)
+        if case.status == "closed" or spec.node(case.current_node).waits_for != "customer_upload":
+            raise StaleEvent("this case is not waiting for photos")
+        order = session.get(Order, case.order_id)
+        rows, checks = ingest(
+            session, self.store, case, uploads, order.delivered_at if order else None
+        )
+        vision: dict[str, Any] | None = None
+        refs: list[str] = []
+        if self.llm is not None:
+            facts = self.runner.facts(case_id)
+            vision, refs = vision_assessment(session, self.store, self.llm, case_id, facts, rows)
+        session.commit()  # evidence is kept even if the case moved on meanwhile
+        payload = {
+            "files": [str(r.id) for r in rows],
+            "checks": checks,
+            "vision": vision,
+            "prompt_refs": refs,
+        }
         result = self.runner.dispatch(
-            case_id, Event("customer_upload", {"files": files}, "customer", str(customer_id))
+            case_id, Event("customer_upload", payload, "customer", str(customer_id))
         )
         return self._respond(session, result)
 

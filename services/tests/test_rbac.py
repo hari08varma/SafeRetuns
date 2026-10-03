@@ -37,6 +37,7 @@ EXPECTED: dict[tuple[str, str], set[Role]] = {
     ("GET", "/api/v1/cases/{case_id}/timeline"): {Role.CUSTOMER},
     ("GET", "/api/v1/console/cases/{case_id}/timeline"): {Role.AGENT, Role.APPROVER, Role.ADMIN},
     ("POST", "/api/v1/console/cases/{case_id}/qc"): {Role.QC_OPERATOR, Role.ADMIN},
+    ("POST", "/api/v1/cases/{case_id}/evidence"): {Role.CUSTOMER},
 }
 
 BODIES = {

@@ -1,12 +1,11 @@
 """Node handlers for graph returns-v1.
 
 Real: AUTHENTICATE, IDENTIFY_ORDER and UNDERSTAND_REQUEST (LLM when configured),
-CHECK_ELIGIBILITY (policy engine), EXPLAIN_INELIGIBLE (clause texts), GENERATE_OPTIONS
-(look-ahead + refund quote), RISK_SCORE / SCORE_OPTIONS / AUTONOMY_GATE (decision layer),
-and the waiting nodes' event handling. Marked STUB nodes get their real logic later
-(evidence: Phase 8); execution nodes process outbox results;
-each stub keeps the state contract those phases fill in. Without an LLM, the LLM nodes
-fall back to structured input from the API.
+CHECK_ELIGIBILITY (policy engine), EXPLAIN_INELIGIBLE (clause texts), ASSESS_EVIDENCE
+(fusion of authenticity checks and vision), GENERATE_OPTIONS (look-ahead + refund quote),
+RISK_SCORE / SCORE_OPTIONS / AUTONOMY_GATE (decision layer), and the waiting nodes' event
+handling; execution nodes process outbox results. Without an LLM, the LLM nodes fall back
+to structured input from the API.
 Handlers never call external systems directly; side effects go through the outbox (Phase 6).
 """
 
@@ -24,6 +23,7 @@ from returns_agent.decision.record import build_record
 from returns_agent.decision.risk import RiskResult, assess_risk, item_value_minor
 from returns_agent.decision.scoring import ScoredOption, keep_item_economical
 from returns_agent.decision.scoring import score_options as rank_options
+from returns_agent.evidence.fusion import fuse
 from returns_agent.graph.compiler import CaseState, Handler
 from returns_agent.graph.lookahead import Feasibility, feasible_options
 from returns_agent.graph.schema import GraphSpec, NodeSpec
@@ -180,10 +180,19 @@ def build_handlers(
 
     def request_evidence(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         counters = state.get("counters") or {}
-        if _event(state).get("timed_out"):
+        e, f = _event(state), _facts(state)
+        if e.get("timed_out"):
             return {"facts": {"timed_out": True, "close_outcome": "cancelled"}}
+        update: dict[str, Any] = {
+            "evidence_provided": True,
+            "evidence_files": [*(f.get("evidence_files") or []), *e.get("files", [])],
+            "evidence_checks": [*(f.get("evidence_checks") or []), *e.get("checks", [])],
+            "vision": e.get("vision") or f.get("vision"),  # latest assessment
+        }
+        if e.get("prompt_refs"):
+            update["llm_trace"] = _trace(f, "ASSESS_EVIDENCE", {"prompt_refs": e["prompt_refs"]})
         return {
-            "facts": {"evidence_provided": True, "evidence_files": _event(state).get("files", [])},
+            "facts": update,
             "counters": {
                 "evidence_requests": counters.get("evidence_requests", 0) + 1,
                 "turns": counters.get("turns", 0) + 1,
@@ -191,7 +200,13 @@ def build_handlers(
         }
 
     def assess_evidence(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        return {"facts": {"evidence": {"needs_more": False}}}  # STUB (Phase 8)
+        # Fusion only: the checks and the vision call ran at upload, next to the files.
+        f = _facts(state)
+        counters = state.get("counters") or {}
+        result = fuse(
+            f.get("evidence_checks") or [], f.get("vision"), counters.get("evidence_requests", 0)
+        )
+        return {"facts": {"evidence": result.model_dump()}}
 
     def risk_score(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         # Rule-based signals now; evidence signals and a model arrive in Phase 8.

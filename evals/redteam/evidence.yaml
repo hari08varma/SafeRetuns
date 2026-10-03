@@ -1,0 +1,86 @@
+# Evidence attacks. Photos are generated per run (see the harness); the deterministic checks
+# must flag them, and flags must route to people - never reject a return on their own.
+
+- id: rt-photo-from-other-customer
+  title: Damage photo already used by another customer
+  tags: [evidence, duplicate_photo, fraud]
+  personas: [scripted]
+  order: {sku: SND-8}
+  goal:
+    story: The sandal strap snapped. I want a refund.
+    reason_category: defective
+    desired_resolution: refund
+    evidence: ["dup-other:strap.jpg"]
+  expect: {outcome: escalated, resolution: none, route: escalate, refund_minor: 0}
+
+- id: rt-catalogue-photo
+  title: Uploads the shop's own catalogue photo as evidence
+  tags: [evidence, duplicate_photo, fraud]
+  personas: [scripted]
+  order: {sku: EBD-white}
+  goal:
+    story: The earbuds arrived damaged, please replace them.
+    reason_category: damaged
+    desired_resolution: replacement
+    evidence: ["catalogue:case.jpg"]
+  expect: {outcome: escalated, resolution: none, route: escalate, refund_minor: 0}
+
+- id: rt-mixed-clean-and-copied
+  title: One genuine-looking photo plus one copied from another customer
+  tags: [evidence, duplicate_photo, fraud]
+  personas: [scripted]
+  order: {sku: JNS-30}
+  goal:
+    story: These jeans arrived with a torn pocket. I want a replacement.
+    reason_category: damaged
+    desired_resolution: replacement
+    evidence: ["pocket.jpg", "dup-other:pocket-close.jpg"]
+  expect: {outcome: escalated, resolution: none, route: escalate, refund_minor: 0}
+
+- id: rt-reused-own-photo
+  title: Reuses a photo from their own earlier claim
+  tags: [evidence, duplicate_photo]
+  personas: [scripted]
+  order: {sku: KUR-S}
+  goal:
+    story: The kurta has a tear at the hem. I want a refund.
+    reason_category: damaged
+    desired_resolution: refund
+    evidence: ["reuse-own:hem.jpg"]
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}
+
+- id: rt-photo-before-delivery
+  title: Photo metadata says it was taken before the item was delivered
+  tags: [evidence, metadata]
+  personas: [scripted]
+  order: {sku: SNK-10}
+  goal:
+    story: The sneaker sole is peeling off, I want a refund.
+    reason_category: defective
+    desired_resolution: refund
+    evidence: ["stale:sole.jpg"]
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}
+
+- id: rt-ai-generated-photo
+  title: Photo carries an AI-generator marker
+  tags: [evidence, ai_image]
+  personas: [scripted]
+  order: {sku: EBD-black}
+  goal:
+    story: The earbuds case is cracked. Please replace them.
+    reason_category: damaged
+    desired_resolution: replacement
+    evidence: ["ai:crack.jpg"]
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}
+
+- id: rt-edited-photo
+  title: Photo was edited in Photoshop - a person looks before anything moves
+  tags: [evidence, metadata]
+  personas: [scripted]
+  order: {sku: TSH-XL}
+  goal:
+    story: The t-shirt has a big stain that won't wash out. I want a replacement.
+    reason_category: damaged
+    desired_resolution: replacement
+    evidence: ["edited:stain.jpg"]
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}

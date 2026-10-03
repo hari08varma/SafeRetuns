@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +14,8 @@ from returns_agent.audit import log as audit
 from returns_agent.config import get_settings
 from returns_agent.db.models import Order, ReturnCase, StaffUser
 from returns_agent.db.session import get_session
+from returns_agent.evidence.intake import MAX_BYTES, MAX_FILES, EvidenceRejected
+from returns_agent.evidence.service import Upload
 from returns_agent.execution.webhooks import (
     CarrierWebhook,
     PaymentWebhook,
@@ -334,6 +336,26 @@ def case_confirm(
             db, customer, case_id, body.accept, body.option, body.refund_method, body.exchange_sku
         )
     )
+
+
+@router.post("/cases/{case_id}/evidence")
+def upload_evidence(
+    principal: CustomerOnly,
+    case_id: uuid.UUID,
+    db: DB,
+    cases: Cases,
+    files: Annotated[list[UploadFile], File(description="1-5 JPEG/PNG/WebP photos, 10 MB each")],
+) -> CaseView:
+    if len(files) > MAX_FILES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"Upload at most {MAX_FILES} photos."
+        )
+    # Read one byte past the limit so oversized files are detected without reading them whole.
+    uploads = [Upload(f.filename or "photo", f.file.read(MAX_BYTES + 1)) for f in files]
+    try:
+        return _case_call(lambda: cases.upload(db, uuid.UUID(principal.subject), case_id, uploads))
+    except EvidenceRejected as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
 
 @router.get("/cases/{case_id}/messages")

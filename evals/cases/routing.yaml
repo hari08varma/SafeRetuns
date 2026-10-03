@@ -74,3 +74,48 @@
     reason_category: damaged
     desired_resolution: replacement
   expect: {outcome: cancelled, resolution: none, refund_minor: 0}
+
+- id: linked-account-new
+  title: New account sharing an address with a heavy returner - approval
+  tags: [approval, risk, linked]
+  customer: {account_age_days: 12, linked_risky_account: true}
+  order: {sku: KUR-M}
+  goal:
+    story: The kurta is too small, I want a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}
+
+- id: linked-account-alone
+  title: A linked account alone does not block automation
+  tags: [refund, risk, linked]
+  customer: {linked_risky_account: true}
+  order: {sku: TSH-L}
+  goal:
+    story: The t-shirt is too tight, I'd like a refund.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 59900}
+
+- id: prior-confirmed-fraud
+  title: Fraud confirmed by staff in an earlier case - a person decides
+  tags: [escalate, risk]
+  customer: {confirmed_fraud: true}
+  order: {sku: KUR-M}
+  goal:
+    story: This kurta doesn't fit, please refund me.
+    reason_category: size_fit
+    desired_resolution: refund
+  expect: {outcome: escalated, resolution: none, route: escalate, refund_minor: 0}
+
+- id: serial-damage-claims
+  title: Fourth damage claim in 90 days - approval even with a clean photo
+  tags: [approval, risk, evidence]
+  customer: {prior_damage_claims_90d: 3, prior_orders_90d: 8}
+  order: {sku: SND-7}
+  goal:
+    story: The sandal buckle broke on the first day. I want a refund.
+    reason_category: defective
+    desired_resolution: refund
+    evidence: [buckle.jpg]
+  expect: {outcome: approval, resolution: none, route: approval, refund_minor: 0}

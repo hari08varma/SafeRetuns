@@ -1,6 +1,6 @@
 # Decision layer settings (admin-editable). Values outside the hard limits in
 # returns_agent/decision/config.py are rejected at load time.
-version: "2026-10-a"
+version: "2026-10-b"
 
 weights:            # option utility = revenue - cost + customer_fit - risk x exposure
   revenue: 0.25
@@ -27,6 +27,19 @@ risk:
   high_value: 0.15         # item value >= high_value_minor
   same_day_return: 0.2     # return started on the delivery day
   cod_high_value: 0.1      # cash on delivery and value >= cod_high_value_minor
+  linked_accounts: 0.2     # shares an email or address with an account that returns a lot
+  prior_confirmed_fraud: 0.6  # confirmed by a person in an earlier case (never automatic)
+  serial_damage_claims: 0.3   # >= 3 damaged/defective claims in 90 days
+  # Evidence signals: route to people, never reject (fairness: no protected attributes,
+  # no location/pincode, no name - only behaviour and the evidence itself).
+  duplicate_photo_other_customer: 0.6
+  catalogue_photo: 0.6
+  reused_own_photo: 0.3
+  photo_before_delivery: 0.3
+  ai_generated_marker: 0.3
+  edited_photo: 0.15
+  reason_evidence_mismatch: 0.3
+  item_mismatch: 0.3
   high_value_minor: 2000000
   cod_high_value_minor: 1000000
 

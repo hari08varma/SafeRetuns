@@ -9,3 +9,4 @@ seed.json
 node_modules/
 .next/
 services/eval-reports/
+services/var/

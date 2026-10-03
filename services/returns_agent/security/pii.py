@@ -34,6 +34,11 @@ def blind_index(value: str) -> str:
     return hmac.new(key.encode(), normalised.encode(), hashlib.sha256).hexdigest()
 
 
+def address_index(address: str) -> str:
+    """Blind index of an address, ignoring case, spacing and punctuation."""
+    return blind_index("".join(c for c in address if c.isalnum()))
+
+
 def mask_phone(phone: str) -> str:
     digits = "".join(c for c in phone if c.isdigit())
     return f"******{digits[-4:]}" if len(digits) >= 4 else "****"

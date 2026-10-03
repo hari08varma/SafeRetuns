@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     pii_encryption_key: str = ""  # Fernet key
     pii_index_key: str = ""  # HMAC key for searchable blind indexes
 
+    evidence_dir: str = "var/evidence"  # local evidence store (S3/MinIO in production)
+
     webhook_secret: str = ""  # HMAC secret shared with carrier/payment providers
     webhook_tolerance_s: int = 300
 

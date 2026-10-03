@@ -68,6 +68,7 @@ class Address(Entity):
     city: Mapped[str] = mapped_column(String(64))
     pincode: Mapped[str] = mapped_column(String(12))
     address_enc: Mapped[str] = mapped_column(Text)
+    address_index: Mapped[str | None] = mapped_column(String(64), index=True)  # blind index
 
 
 class OtpChallenge(Entity):
@@ -91,6 +92,7 @@ class Product(Entity):
     price_minor: Mapped[int] = mapped_column(BigInteger)
     returnable: Mapped[bool]
     image_uris: Mapped[list[Any]] = mapped_column(default=list)
+    image_phashes: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
 
 
 class Order(Entity):
@@ -207,7 +209,9 @@ class Evidence(Entity):
     case_id: Mapped[uuid.UUID] = fk("return_case.id")
     return_item_id: Mapped[uuid.UUID | None] = fk("return_item.id", nullable=True)
     uri: Mapped[str] = mapped_column(Text)
+    thumb_uri: Mapped[str | None] = mapped_column(Text)
     mime: Mapped[str] = mapped_column(String(64))
+    sha256: Mapped[str | None] = mapped_column(String(64), index=True)  # of the original upload
     phash: Mapped[str | None] = mapped_column(String(32), index=True)
     exif: Mapped[dict[str, Any]] = mapped_column(default=dict)
     checks: Mapped[dict[str, Any]] = mapped_column(default=dict)

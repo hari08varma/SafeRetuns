@@ -35,6 +35,7 @@ from returns_agent.db.models import (
     Address,
     AuditEvent,
     Customer,
+    Evidence,
     Exchange,
     Message,
     Order,
@@ -56,8 +57,12 @@ from returns_agent.evals.graders import (
     grade_state,
     judge_tone,
 )
+from returns_agent.evals.photos import make_photo
 from returns_agent.evals.simulator import Customer as SimCustomer
 from returns_agent.evals.simulator import LLMCustomer, ScriptedCustomer, confirm_choice
+from returns_agent.evidence.checks import IST
+from returns_agent.evidence.hashing import orientation_hashes
+from returns_agent.evidence.intake import sanitise
 from returns_agent.execution.relay import Relay
 from returns_agent.execution.webhooks import CarrierWebhook, handle_carrier
 from returns_agent.graph.nodes import build_handlers
@@ -65,11 +70,12 @@ from returns_agent.graph.registry import GraphRegistry
 from returns_agent.graph.runner import CaseRunner, make_feasibility
 from returns_agent.llm.client import LLMClient
 from returns_agent.llm.metering import MeteredClient
-from returns_agent.security.pii import blind_index, encrypt
+from returns_agent.security.pii import address_index, blind_index, encrypt
 from returns_agent.security.tokens import Principal, Role, issue_token
 from returns_agent.seed.generator import generate
 
 MAX_STEPS = 40
+PHOTO_KINDS = {"", "stale", "edited", "ai", "dup-other", "reuse-own", "catalogue"}
 STOP_WAITS = ("approval", "human_resolution")  # handed to people: the agent's part is done
 
 
@@ -107,6 +113,7 @@ class _World:
     pii: list[str]
     others_pii: list[str]
     title: str
+    photos: list[tuple[str, bytes]]
 
 
 class Harness:
@@ -233,9 +240,8 @@ class Harness:
                 if not goal.evidence:
                     self.runner.timeout(case_id, node, "customer_upload")
                     continue
-                with self.sessions() as session:
-                    self.cases.upload(session, world.customer_id, case_id, goal.evidence)
-                continue
+                files = [("files", (name, data, "image/jpeg")) for name, data in world.photos]
+                r = self.client.post(f"{base}/evidence", files=files, headers=headers)
             elif waiting == "customer_confirm":
                 choice = confirm_choice(case, self.runner.facts(case_id).get("options") or [])
                 payload = choice or {"accept": False}
@@ -333,6 +339,7 @@ class Harness:
                 city="Hyderabad",
                 pincode=pincode,
                 address_enc=encrypt(f"Flat {n}, Hyderabad {pincode}"),
+                address_index=address_index(f"Flat {n}, Hyderabad {pincode}"),
             )
         )
         return customer, [phone, email]
@@ -377,15 +384,104 @@ class Harness:
         order.items = [item]
         session.add(order)
         self._history(session, customer, case, now)
+        photos = self._photos(session, case, customer, product, delivered or now)
         session.commit()
-        return _World(customer.id, ref, item.external_id, item.id, pii, others, product.title)
+        return _World(
+            customer.id, ref, item.external_id, item.id, pii, others, product.title, photos
+        )
+
+    def _photos(
+        self,
+        session: Session,
+        case: EvalCase,
+        customer: Customer,
+        product: Product,
+        delivered: datetime,
+    ) -> list[tuple[str, bytes]]:
+        """Evidence the customer will upload. A spec is "name" (a fresh photo taken after
+        delivery) or "kind:name" for an authenticity test: stale (taken before delivery),
+        edited (editor in metadata), ai (generator marker), dup-other (same picture already
+        used by another customer), reuse-own (used in this customer's earlier case),
+        catalogue (the shop's own product photo)."""
+        photos = []
+        for spec in case.goal.evidence:
+            kind, _, name = spec.rpartition(":")
+            if kind not in PHOTO_KINDS:
+                raise ValueError(f"unknown evidence kind {kind!r} in {case.id}")
+            taken = delivered + (timedelta(days=-10) if kind == "stale" else timedelta(hours=2))
+            data = make_photo(
+                f"{self.run_token}-{next(self._ids)}-{name}",
+                captured_at=taken.astimezone(IST).replace(tzinfo=None),
+                software="Adobe Photoshop 25.0" if kind == "edited" else None,
+                comment="Generated with Midjourney v6" if kind == "ai" else None,
+            )
+            phash = orientation_hashes(sanitise(data).image)[0]
+            if kind == "catalogue":
+                product.image_phashes = [*product.image_phashes, phash]
+            elif kind in ("dup-other", "reuse-own"):
+                owner = customer
+                if kind == "dup-other":
+                    owner, _ = self._new_customer(session, case, "110017")
+                self._plant_evidence(session, owner, phash)
+            photos.append((name, data))
+        return photos
+
+    def _plant_evidence(self, session: Session, owner: Customer, phash: str) -> None:
+        """An earlier, closed case of `owner` whose evidence has this perceptual hash."""
+        now = datetime.now(UTC)
+        order = Order(
+            external_id=f"EVP-{owner.external_id}-{next(self._ids)}",
+            customer_id=owner.id,
+            placed_at=now - timedelta(days=60),
+            delivered_at=now - timedelta(days=57),
+            status="delivered",
+            payment_method="upi",
+            coupon_minor=0,
+            total_minor=59900,
+        )
+        session.add(order)
+        session.flush()
+        earlier = ReturnCase(
+            customer_id=owner.id,
+            order_id=order.id,
+            graph_version=self.runner.registry.active_version,
+            status="closed",
+            current_node="CLOSE",
+            closed_at=now - timedelta(days=50),
+        )
+        session.add(earlier)
+        session.flush()
+        session.add(
+            Evidence(case_id=earlier.id, uri="file://planted", mime="image/jpeg", phash=phash)
+        )
 
     def _history(self, session: Session, customer: Customer, case: EvalCase, now: datetime) -> None:
         """Earlier orders and returns in the last 90 days (risk signals read these)."""
-        past = [
-            Order(
-                external_id=f"EVH-{customer.external_id}-{i}",
-                customer_id=customer.id,
+        c = case.customer
+        plain_returns = c.prior_returns_90d
+        extra_orders = max(0, c.prior_orders_90d - plain_returns - c.prior_damage_claims_90d)
+        self._past_orders(session, customer, extra_orders, now)
+        self._past_returns(session, customer, plain_returns, now)
+        self._past_returns(session, customer, c.prior_damage_claims_90d, now, reason="defective")
+        if c.confirmed_fraud:
+            customer.risk_profile = {"confirmed_fraud": True}
+        if c.linked_risky_account:
+            linked, _ = self._new_customer(session, case, "500081")
+            session.flush()
+            mine = session.scalars(select(Address).where(Address.customer_id == customer.id)).one()
+            theirs = session.scalars(select(Address).where(Address.customer_id == linked.id)).one()
+            theirs.address_index = mine.address_index  # same delivery address
+            self._past_returns(session, linked, 3, now)
+
+    def _past_orders(
+        self, session: Session, owner: Customer, count_: int, now: datetime
+    ) -> list[OrderItem]:
+        items = []
+        for _ in range(count_):
+            ref = f"EVH-{owner.external_id}-{next(self._ids)}"
+            order = Order(
+                external_id=ref,
+                customer_id=owner.id,
                 placed_at=now - timedelta(days=40),
                 delivered_at=now - timedelta(days=36),
                 status="delivered",
@@ -393,24 +489,43 @@ class Harness:
                 coupon_minor=0,
                 total_minor=59900,
             )
-            for i in range(
-                max(case.customer.prior_orders_90d, min(1, case.customer.prior_returns_90d))
+            item = OrderItem(
+                external_id=f"{ref}-1",
+                sku="TSH-M",
+                qty=1,
+                unit_price_minor=59900,
+                discount_alloc_minor=0,
+                final_sale=False,
             )
-        ]
-        session.add_all(past)
+            order.items = [item]
+            session.add(order)
+            items.append(item)
         session.flush()
-        version = self.runner.registry.active_version
-        session.add_all(
-            ReturnCase(
-                customer_id=customer.id,
-                order_id=past[i % len(past)].id,
-                graph_version=version,
+        return items
+
+    def _past_returns(
+        self,
+        session: Session,
+        owner: Customer,
+        count_: int,
+        now: datetime,
+        reason: str | None = None,
+    ) -> None:
+        """Closed earlier returns, each on its own past order (counted as orders too)."""
+        for item in self._past_orders(session, owner, count_, now):
+            earlier = ReturnCase(
+                customer_id=owner.id,
+                order_id=item.order_id,
+                graph_version=self.runner.registry.active_version,
                 status="closed",
                 current_node="CLOSE",
                 closed_at=now - timedelta(days=30),
             )
-            for i in range(case.customer.prior_returns_90d)
-        )
+            session.add(earlier)
+            session.flush()
+            session.add(
+                ReturnItem(case_id=earlier.id, order_item_id=item.id, qty=1, reason_category=reason)
+            )
 
     # --- Reading the end state -------------------------------------------------------------
 

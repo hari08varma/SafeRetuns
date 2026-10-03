@@ -21,7 +21,9 @@ COPY services/alembic.ini ./
 COPY config ./config
 RUN uv sync --frozen --no-dev
 
-RUN useradd --create-home --uid 10001 app
+RUN useradd --create-home --uid 10001 app \
+    && mkdir -p /app/var/evidence && chown -R app /app/var
+ENV EVIDENCE_DIR=/app/var/evidence
 USER app
 
 EXPOSE 8000

@@ -50,6 +50,9 @@ class CustomerSetup(_Strict):
     account_age_days: int = 400
     prior_returns_90d: int = 0  # earlier return cases in the last 90 days
     prior_orders_90d: int = 0  # other orders in the last 90 days
+    prior_damage_claims_90d: int = 0  # earlier damaged/defective returns (count as returns too)
+    confirmed_fraud: bool = False  # confirmed by a person in an earlier case
+    linked_risky_account: bool = False  # shares an address with an account that returns a lot
 
 
 class OrderSetup(_Strict):
