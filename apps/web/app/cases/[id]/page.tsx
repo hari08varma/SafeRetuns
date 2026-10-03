@@ -45,7 +45,7 @@ export default function CasePage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  useEffect(() => chatEnd.current?.scrollIntoView({ block: "nearest" }), [messages.length]);
+  useEffect(() => { chatEnd.current?.scrollIntoView({ block: "nearest" }); }, [messages.length]);
 
   async function act(fn: () => Promise<unknown>) {
     setBusy(true);

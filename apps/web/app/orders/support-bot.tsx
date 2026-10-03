@@ -61,7 +61,7 @@ export function SupportBot({ name, items }: { name: string; items: BotItem[] }) 
   useEffect(() => {
     try { sessionStorage.setItem(STORE, JSON.stringify({ msgs, step, view, seen })); } catch { /* ignore */ }
   }, [msgs, step, view, seen]);
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth" }), [msgs, typing, step, view]);
+  useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, typing, step, view]);
 
   const add = (m: Omit<Msg, "at">) => setMsgs((all) => [...all, { ...m, at: Date.now() }]);
   const bot = (t: string, next?: Step, delay = 500) => {
