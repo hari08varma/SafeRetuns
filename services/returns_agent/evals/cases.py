@@ -145,7 +145,7 @@ def load_cases(
     cases: list[EvalCase] = []
     for suite in suites:
         for path in sorted((root / suite).glob("*.yaml")):
-            for raw in yaml.safe_load(path.read_text()) or []:
+            for raw in yaml.safe_load(path.read_text(encoding="utf-8")) or []:
                 cases.append(EvalCase.model_validate({**raw, "suite": suite}))
     ids = [c.id for c in cases]
     duplicates = sorted({i for i in ids if ids.count(i) > 1})

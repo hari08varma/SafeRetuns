@@ -16,7 +16,8 @@ from returns_agent.agent.context import (
     redactor_for,
     system_message,
 )
-from returns_agent.agent.verifier import verify
+from returns_agent.agent.money import format_inr
+from returns_agent.agent.verifier import PLACEHOLDER, verify
 from returns_agent.llm.client import LLMClient, LLMRequest, complete_structured
 from returns_agent.llm.prompts import Prompt, load_prompt
 from returns_agent.llm.redaction import Redactor
@@ -65,7 +66,8 @@ def decision_view(facts: dict[str, Any], waiting_node: str | None) -> dict[str, 
         "language": facts.get("language", "en"),
         "options": options if situation == "offer" else [],
         "recommended": facts.get("chosen_option") if situation == "offer" else None,
-        "amounts_minor": [quote["total_minor"]] if quote and money else [],
+        "amounts_minor": [quote["total_minor"]] if quote and money else [],  # for checks only
+        "amounts": [format_inr(quote["total_minor"])] if quote and money else [],
         "timeline_days": [],
         "missing_details": facts.get("missing_slots") or [],
         "evidence_needed": (facts.get("evidence") or {}).get("missing_views")
@@ -96,7 +98,7 @@ def template(view: dict[str, Any]) -> str:
     if s == "offer":
         choices = " or ".join(OPTION_LABELS.get(o, o) for o in view["options"])
         amount = (
-            f" The refund amount would be ₹{view['amounts_minor'][0] / 100:,.2f}."
+            f" The refund amount would be {format_inr(view['amounts_minor'][0])}."
             if view["amounts_minor"]
             else ""
         )
@@ -146,7 +148,8 @@ def _generate(
     feedback: list[str] = []
     violations: list[str] = []
     for _ in range(2):
-        data: dict[str, Any] = {"DECISION": view}
+        # The model sees rupees only: raw paise invite "a refund of 129900".
+        data: dict[str, Any] = {"DECISION": {k: v for k, v in view.items() if k != "amounts_minor"}}
         if feedback:
             data["FIX_THESE_PROBLEMS"] = feedback
         request = LLMRequest(
@@ -158,10 +161,13 @@ def _generate(
             max_tokens=512,
         )
         draft = complete_structured(llm, request, Draft).message
-        violations = verify(llm, draft, view)
+        violations = verify(llm, draft, view, redactor.tokens)
+        restored = redactor.restore(draft)
+        if not violations and PLACEHOLDER.search(restored):  # never send a raw <TOKEN_1>
+            violations = ["placeholder left after restoring private details"]
         if not violations:
             return Reply(
-                text=redactor.restore(draft),
+                text=restored,
                 used_template=False,
                 prompt_refs=prompt_refs(prompt, load_prompt("verify")),
             )

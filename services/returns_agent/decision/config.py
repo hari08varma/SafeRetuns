@@ -94,4 +94,4 @@ class DecisionConfig(BaseModel):
 
 
 def load_decision_config(path: Path) -> DecisionConfig:
-    return DecisionConfig.model_validate(yaml.safe_load(path.read_text()))
+    return DecisionConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))

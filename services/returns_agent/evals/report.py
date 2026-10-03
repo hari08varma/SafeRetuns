@@ -267,13 +267,17 @@ def write_report(report: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
     previous = None
     key = (report["mode"], report.get("selection"))  # compare like with like
     if history.exists():
-        runs = [json.loads(line) for line in history.read_text().splitlines() if line.strip()]
+        runs = [
+            json.loads(line)
+            for line in history.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
         same = [h for h in runs if (h["mode"], h.get("selection")) == key]
         previous = same[-1] if same else None
     json_path = out_dir / f"{report['run_id']}.json"
     md_path = out_dir / f"{report['run_id']}.md"
-    json_path.write_text(json.dumps(report, indent=2, default=str))
-    md_path.write_text(render_markdown(report, previous))
+    json_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    md_path.write_text(render_markdown(report, previous), encoding="utf-8")
     summary = {
         k: report.get(k)
         for k in (
@@ -287,6 +291,6 @@ def write_report(report: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
         )
     }
     summary["metrics"] = {k: v for k, v in report["metrics"].items() if not isinstance(v, dict)}
-    with history.open("a") as fh:
+    with history.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(summary, default=str) + "\n")
     return json_path, md_path

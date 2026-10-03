@@ -82,8 +82,8 @@ def test_same_value_gets_same_token() -> None:
 
 
 def test_prompts_are_versioned() -> None:
-    expected = {"system": "1", "understand_request": "2", "identify_order": "1", "respond": "1"}
-    for name, version in {**expected, "verify": "1"}.items():
+    expected = {"system": "1", "understand_request": "2", "identify_order": "1", "respond": "2"}
+    for name, version in {**expected, "verify": "2"}.items():
         p = load_prompt(name)
         assert p.version == version and p.text and len(p.content_hash) == 16
 
@@ -195,6 +195,22 @@ OFFER = {
         ("We guarantee an exchange.", ["guarantee language"]),
         ("We can send a replacement.", ["option not offered: replacement"]),
         ("You'll get store credit.", ["option not offered: store_credit"]),
+        # Live-run bugs: paise shown to the customer, an invented placeholder.
+        (
+            "You can get a refund of 129900.",
+            ["amount written in paise (129900); write it exactly as in DECISION.amounts"],
+        ),
+        (
+            "Refund ki amount <AMOUNT_1> hogi.",
+            [
+                "placeholder <AMOUNT_1> is not allowed; "
+                "write the value from DECISION or leave it out"
+            ],
+        ),
+        ("A refund of 1,299 is available.", []),  # the decided amount without a sign
+        ("Refund of १२९९ rupees.", []),  # Devanagari digits
+        ("We noted pincode 500081.", ["number not in decision: 500081"]),
+        ("Order ORD-H0001, size 32, exchange or refund.", []),  # codes and sizes are fine
     ],
 )
 def test_deterministic_verifier(message: str, expected: list[str]) -> None:
@@ -226,7 +242,7 @@ def test_reply_passes_verification() -> None:
     r = reply(fake, OFFER_FACTS, "CUSTOMER_CONFIRM")
     assert not r.used_template and "exchange" in r.text
     assert '"language": "hi-Latn"' in fake.calls[0].messages[0]["content"]
-    assert r.prompt_refs == ["system@1", "respond@1", "verify@1"]
+    assert r.prompt_refs == ["system@1", "respond@2", "verify@2"]
 
 
 def test_reply_regenerates_then_falls_back_to_template() -> None:
@@ -269,10 +285,12 @@ def test_decision_view_exposes_only_decided_facts() -> None:
         "options",
         "recommended",
         "amounts_minor",
+        "amounts",
         "timeline_days",
         "missing_details",
         "evidence_needed",
     }
+    assert view["amounts"] == ["₹1,299.00"]
     closed = decision_view(
         {
             "close_outcome": "rejected",
@@ -312,3 +330,66 @@ def test_metering_and_circuit_breaker() -> None:
     inner.fail = False
     assert client.complete(req).text == "ok"
     assert client.records[-1].input_tokens == 10 and client.records[-1].output_tokens == 3
+
+
+def test_model_sees_rupees_never_paise() -> None:
+    fake = FakeProvider(['{"message": "Exchange ya ₹1,299.00 ka refund."}', '{"violations": []}'])
+    reply(fake, OFFER_FACTS, "CUSTOMER_CONFIRM")
+    prompts = json.dumps([c.messages for c in fake.calls], ensure_ascii=False)
+    assert "₹1,299.00" in prompts and "129900" not in prompts
+
+
+def test_paise_and_placeholder_drafts_are_corrected_before_sending() -> None:
+    fake = FakeProvider(
+        [
+            '{"message": "Refund ki amount <AMOUNT_1> hogi."}',  # blocked deterministically
+            '{"message": "Aapko ₹1,299.00 ka refund ya exchange mil sakta hai."}',
+            '{"violations": []}',
+        ]
+    )
+    r = reply(fake, OFFER_FACTS, "CUSTOMER_CONFIRM")
+    assert r.text == "Aapko ₹1,299.00 ka refund ya exchange mil sakta hai."
+    assert not r.used_template
+    feedback = fake.calls[1].messages[0]["content"]
+    assert "placeholder <AMOUNT_1> is not allowed" in feedback
+
+
+def test_repeated_paise_drafts_fall_back_to_a_correct_template() -> None:
+    fake = FakeProvider(['{"message": "Refund of 129900."}', '{"message": "Refund: 129900"}'])
+    r = reply(fake, OFFER_FACTS, "CUSTOMER_CONFIRM")
+    assert r.used_template and "₹1,299.00" in r.text and "129900" not in r.text
+
+
+def test_own_tokens_restore_but_unknown_tokens_never_reach_the_customer() -> None:
+    f = facts(
+        "too tight, call +91 98765 43210",
+        **{k: v for k, v in OFFER_FACTS.items() if k != "conversation"},
+    )
+    fake = FakeProvider(
+        [
+            '{"message": "We will call <PHONE_1> about your exchange or refund."}',
+            '{"violations": []}',
+        ]
+    )
+    r = reply(fake, f, "CUSTOMER_CONFIRM")
+    assert "+91 98765 43210" in r.text and "<" not in r.text
+
+
+def test_checker_allows_general_next_steps() -> None:
+    """The live run blocked harmless lines; the checker prompt now says what is allowed."""
+    prompt = load_prompt("verify").text
+    assert "our team will review your request and update you here" in prompt
+    assert "Flag only CONCRETE commitments" in prompt
+    escalated = decision_view(OFFER_FACTS, "ESCALATE")
+    fake = FakeProvider(['{"violations": []}'])
+    message = "Sorry about this. Our team will review your request and update you here."
+    assert verify(fake, message, escalated) == []
+
+
+def test_indian_rupee_formatting() -> None:
+    from returns_agent.agent.money import format_inr
+
+    assert format_inr(129900) == "₹1,299.00"
+    assert format_inr(4299900) == "₹42,999.00"
+    assert format_inr(12999900) == "₹1,29,999.00"
+    assert format_inr(100000000) == "₹10,00,000.00"

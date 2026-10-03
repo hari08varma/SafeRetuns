@@ -215,7 +215,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     data = generate(seed=args.seed, customers=args.customers)
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         json.dump(data.model_dump(mode="json"), f, indent=2)
     print(
         f"wrote {len(data.customers)} customers, {len(data.products)} products, "

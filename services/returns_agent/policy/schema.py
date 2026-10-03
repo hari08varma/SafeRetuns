@@ -57,7 +57,7 @@ class PolicyError(ValueError):
 
 
 def load_policy(path: str | Path) -> PolicyDoc:
-    doc = PolicyDoc.model_validate(yaml.safe_load(Path(path).read_text()))
+    doc = PolicyDoc.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
     ids = [r.clause_id for r in doc.rules]
     if len(ids) != len(set(ids)):
         raise PolicyError(f"duplicate clause ids in {path}")

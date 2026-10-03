@@ -129,6 +129,6 @@ def _closure(seeds: set[str], adjacency: dict[str, list[str]]) -> set[str]:
 
 
 def load_graph(path: str | Path) -> GraphSpec:
-    spec = GraphSpec.model_validate(json.loads(Path(path).read_text()))
+    spec = GraphSpec.model_validate(json.loads(Path(path).read_text(encoding="utf-8")))
     validate_graph(spec)
     return spec

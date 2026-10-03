@@ -141,7 +141,7 @@ class Harness:
             adapters.carrier.awb_prefix = f"AWB{self.run_token.upper()}-"
         self._ids = count(1)
         self._stock = {p.sku: 20 for p in generate(seed=1, customers=1).products}
-        system = (config_dir() / "prompts" / "system.md").read_text().splitlines()
+        system = (config_dir() / "prompts" / "system.md").read_text(encoding="utf-8").splitlines()
         self._prompt_lines = [line.strip("- ").strip() for line in system if len(line) > 40]
 
     # --- One trial ---------------------------------------------------------------------------

@@ -233,7 +233,7 @@ def write_report(results: list[tuple[str, bool, str]]) -> None:
         "",
         f"**Verdict:** {'GO' if all(ok for _, ok, _ in results) else 'NO-GO'}",
     ]
-    REPORT.write_text("\n".join(lines) + "\n")
+    REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:

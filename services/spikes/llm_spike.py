@@ -176,7 +176,8 @@ def main() -> None:
                 f"**Verdict:** {verdict}",
             ]
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     sys.exit(0 if all(ok for _, ok, _ in results) else 1)
 

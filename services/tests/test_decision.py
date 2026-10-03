@@ -49,7 +49,7 @@ def test_shipped_config_loads() -> None:
 def test_config_outside_limits_is_rejected(
     tmp_path: Path, path: tuple[str, str], value: float
 ) -> None:
-    data = yaml.safe_load((config_dir() / "decision.yaml").read_text())
+    data = yaml.safe_load((config_dir() / "decision.yaml").read_text(encoding="utf-8"))
     data[path[0]][path[1]] = value
     with pytest.raises(ValidationError):
         DecisionConfig.model_validate(data)

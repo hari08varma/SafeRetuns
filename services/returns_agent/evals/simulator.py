@@ -82,7 +82,7 @@ class LLMCustomer:
         delivered = (
             f"{o.delivered_days_ago} days ago" if o.delivered_days_ago is not None else "not yet"
         )
-        template = (evals_dir() / "simulator" / "customer.md").read_text()
+        template = (evals_dir() / "simulator" / "customer.md").read_text(encoding="utf-8")
         template = template.split("-->", 1)[1].strip() if template.startswith("<!--") else template
         return template.format(
             item=f"{self.title or o.sku} (SKU {o.sku}), quantity {g.qty_returning}",

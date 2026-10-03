@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     expected = {c.id: c.expect.model_dump() for c in cases}
     report = build_report(run, results, expected)
     _, md = write_report(report, args.out or evals_dir() / "reports")
-    print(md.read_text())
+    print(md.read_text(encoding="utf-8"))
     print(f"report: {md}")
     failed_bar = any(b["ok"] is False for b in report["bars"])
     if (args.check_bars and failed_bar) or (args.strict and report["failures"]):

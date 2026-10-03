@@ -360,8 +360,12 @@ def test_case_finishes_on_the_version_it_started(
     tmp_path: Path,
 ) -> None:
     shutil.copy(config_dir() / "graphs" / "returns_v1.json", tmp_path / "returns_v1.json")
-    v2 = (tmp_path / "returns_v1.json").read_text().replace('"returns-v1"', '"returns-v2"')
-    (tmp_path / "returns_v2.json").write_text(v2)
+    v2 = (
+        (tmp_path / "returns_v1.json")
+        .read_text(encoding="utf-8")
+        .replace('"returns-v1"', '"returns-v2"')
+    )
+    (tmp_path / "returns_v2.json").write_text(v2, encoding="utf-8")
 
     old_runner = make_runner(saver, inventory, carrier, tmp_path, active="returns-v1")
     old_case, cust = new_case(seeded_db, old_runner)

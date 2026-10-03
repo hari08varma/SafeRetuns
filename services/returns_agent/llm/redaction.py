@@ -42,6 +42,11 @@ class Redactor:
             text = pattern.sub(self._replacer(label), text)
         return text
 
+    @property
+    def tokens(self) -> frozenset[str]:
+        """Placeholders this redactor created (the only ones restore can fill)."""
+        return frozenset(self._reverse)
+
     def restore(self, text: str) -> str:
         for token, value in self._reverse.items():
             text = text.replace(token, value)

@@ -263,10 +263,10 @@ def test_report_bars_and_trend(tmp_path: Path) -> None:
     assert names["Refund amount exactness"] is False and names["pass^4"] is False
     assert names["pass^1"] is False  # 0.75 < 0.90
     _, md = write_report(report2, tmp_path)
-    text = md.read_text()
+    text = md.read_text(encoding="utf-8")
     assert "| refund_exactness | 0.0% | 100.0% |" in text  # compared with run r1
     assert "**a** (clear, trial 0)" in text
-    assert len((tmp_path / "history.jsonl").read_text().splitlines()) == 2
+    assert len((tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()) == 2
 
 
 def test_unmeasured_bars_read_not_applicable() -> None:

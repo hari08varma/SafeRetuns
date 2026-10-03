@@ -28,7 +28,7 @@ class Prompt:
 
 @lru_cache
 def load_prompt(name: str) -> Prompt:
-    raw = (config_dir() / "prompts" / f"{name}.md").read_text()
+    raw = (config_dir() / "prompts" / f"{name}.md").read_text(encoding="utf-8")
     match = _HEADER.match(raw)
     if not match:
         raise ValueError(f"prompt {name} is missing its '<!-- version: N -->' header")

@@ -310,7 +310,7 @@ def test_version_in_force_on_order_date() -> None:
 
 def _write(tmp_path: Path, body: str) -> Path:
     path = tmp_path / "p.yaml"
-    path.write_text(body)
+    path.write_text(body, encoding="utf-8")
     return path
 
 
