@@ -1,6 +1,7 @@
 """Run the eval suite and write a report.
 
   python -m returns_agent.evals.run --mode smoke            # no model: scripted customers
+  python -m returns_agent.evals.run --mode full --demo      # 20 cases on DeepSeek, ~5 min
   python -m returns_agent.evals.run --mode full --trials 4  # DeepSeek agent + LLM customers
 
 Smoke runs in CI on every change; full runs nightly and before a release. The database must
@@ -53,10 +54,11 @@ def run_suite(
     mode: Mode,
     trials: int,
     progress: bool = False,
+    demo: bool = False,
 ) -> list[TrialResult]:
     results = []
     for case in cases:
-        for persona in case.variants(mode):
+        for persona in case.variants(mode, demo):
             for trial in range(1, trials + 1):
                 result = harness.run(case, persona, trial)
                 results.append(result)
@@ -88,6 +90,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None, help="report directory")
     parser.add_argument("--check-bars", action="store_true", help="exit 1 if a bar fails")
     parser.add_argument("--strict", action="store_true", help="exit 1 if any trial fails")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="the 20 demo cases, one customer style each, 1 trial (cheap real-model check)",
+    )
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -96,7 +103,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"refusing to write eval data to '{db_name}': use a *_test or *_eval database")
         return 2
     mode: Mode = "scripted" if args.mode == "smoke" else "llm"
-    trials = args.trials or (1 if mode == "scripted" else 4)
+    trials = args.trials or (1 if mode == "scripted" or args.demo else 4)
+    if args.demo:
+        args.tag = [*args.tag, "demo"]
     agent_llm = customer_llm = judge_llm = None
     if mode == "llm":
         agent_llm = build_llm_client(settings)
@@ -119,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         ensure_catalog(session)
     started = datetime.now(UTC)
     with open_harness(settings.database_url, engine, agent_llm, customer_llm, judge_llm) as h:
-        results = run_suite(h, cases, mode, trials, progress=True)
+        results = run_suite(h, cases, mode, trials, progress=True, demo=args.demo)
 
     run: dict[str, Any] = {
         "run_id": f"{started:%Y%m%dT%H%M%SZ}-{args.mode}",
@@ -130,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
         "graph_version": settings.graph_active_version,
         "decision_version": load_decision_config(config_dir() / "decision.yaml").version,
         "commit": _commit(),
-        "selection": f"suite={args.suite} tags={sorted(args.tag)} cases={sorted(args.case)}",
+        "selection": f"suite={args.suite} tags={sorted(args.tag)} cases={sorted(args.case)}"
+        + (" demo" if args.demo else ""),
     }
     expected = {c.id: c.expect.model_dump() for c in cases}
     report = build_report(run, results, expected)

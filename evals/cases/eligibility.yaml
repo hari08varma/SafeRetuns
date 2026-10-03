@@ -2,7 +2,8 @@
 
 - id: outside-window
   title: Day 31 - outside the 30-day window
-  tags: [rejected, window]
+  tags: [rejected, window, demo]
+  demo_persona: clear
   order: {sku: KUR-M, delivered_days_ago: 31}
   goal:
     story: The kurta doesn't fit, I want to return it for a refund.
@@ -49,7 +50,8 @@
 
 - id: perishable-changed-mind
   title: Mangoes, change of mind - perishable
-  tags: [rejected, non_returnable]
+  tags: [rejected, non_returnable, demo]
+  demo_persona: hinglish
   order: {sku: MNG-1kg}
   goal:
     story: I ordered mangoes by mistake, please take them back.
@@ -80,7 +82,8 @@
 
 - id: final-sale-size
   title: Final-sale item with a size problem
-  tags: [rejected, final_sale]
+  tags: [rejected, final_sale, demo]
+  demo_persona: clear
   order: {sku: KUR-L, final_sale: true}
   goal:
     story: The sale kurta is too big, I'd like to return it for a refund.

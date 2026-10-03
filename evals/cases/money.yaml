@@ -3,7 +3,8 @@
 
 - id: coupon-prorated
   title: Coupon share deducted from the refund
-  tags: [refund, coupon]
+  tags: [refund, coupon, demo]
+  demo_persona: clear
   order: {sku: JNS-30, discount_minor: 20000}
   goal:
     story: The jeans are too long for me, I want a refund.
@@ -13,7 +14,8 @@
 
 - id: partial-one-of-three
   title: Returns 1 of 3 t-shirts bought with a coupon
-  tags: [refund, partial, coupon]
+  tags: [refund, partial, coupon, demo]
+  demo_persona: clear
   order: {sku: TSH-M, qty: 3, discount_minor: 30000}
   goal:
     story: I bought three of these t-shirts. One has a print that doesn't match the photos, I want to return that one for a refund.
@@ -47,7 +49,8 @@
 
 - id: cod-refund-upi
   title: Cash on delivery, refund to UPI
-  tags: [refund, cod, india]
+  tags: [refund, cod, india, demo]
+  demo_persona: clear
   order: {sku: KUR-M, payment_method: cod}
   goal:
     story: The kurta is too small. I paid cash on delivery; please refund me to my UPI.
@@ -80,7 +83,8 @@
 
 - id: gift-exchange
   title: Gift recipient exchanges for another size
-  tags: [exchange, gift]
+  tags: [exchange, gift, demo]
+  demo_persona: clear
   order: {sku: KUR-M}
   goal:
     story: I received this kurta as a gift but it is too small. Can I exchange it for size L?

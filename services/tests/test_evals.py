@@ -390,3 +390,76 @@ def test_llm_customer_drives_a_case_and_usage_is_metered(seeded_db: Session) -> 
     assert customer_lines == ["I want to return my kurta", "It's too small for me"]
     assert r.customer_usage.calls == 3 and r.agent_usage.calls == 0
     assert r.observation.outcome == "cancelled"  # no agent model to read the answer: times out
+
+
+# --- `make eval-demo`: the cheap real-model check -----------------------------------------------
+
+DEMO = [c for c in load_cases() if "demo" in c.tags]
+
+
+def test_demo_set_is_twenty_conversations_with_varied_customers() -> None:
+    assert len(DEMO) == 20
+    variants = [v for c in DEMO for v in c.variants("llm", demo=True)]
+    assert len(variants) == 20  # one conversation per case, no persona multiplication
+    assert {"clear", "hinglish", "vague", "angry", "changes_mind", SCRIPTED} <= set(variants)
+    assert sum(c.suite == "redteam" for c in DEMO) == 6
+    # Synthetic photos cannot pass a real vision model; only attack cases (which must be
+    # escalated anyway) may use them in the demo.
+    for c in DEMO:
+        if c.goal.evidence:
+            assert c.expect.outcome == "escalated", c.id
+
+
+@needs_db
+def test_demo_flag_selects_only_demo_cases(seeded_db: Session, tmp_path: Path) -> None:
+    from returns_agent.evals.run import main
+
+    assert main(["--mode", "smoke", "--demo", "--strict", "--out", str(tmp_path)]) == 0
+    report = json.loads(next(tmp_path.glob("*-smoke.json")).read_text(encoding="utf-8"))
+    ran = {r["case"] for r in report["results"]}
+    expected = {c.id for c in DEMO if "scripted" in c.modes}
+    assert ran == expected and report["trials"] == 1
+
+
+class RuleModel:
+    """Stands in for DeepSeek: answers each prompt type with valid, policy-safe output."""
+
+    def __init__(self, story: str) -> None:
+        self.story = story
+        self.calls = 0
+
+    def complete(self, request: Any) -> Any:
+        from returns_agent.llm.client import LLMResponse
+
+        self.calls += 1
+        system = request.messages[0]["content"]
+        if "extract what the customer wants" in system:
+            text = {"reason_category": "size_fit", "desired_resolution": "refund"}
+        elif "Write the next message to the customer" in system:
+            text = {"message": "Sorry about that. We will update you here as your return moves."}
+        elif "You check a message" in system:
+            text = {"violations": []}
+        elif "role-playing a customer" in system:
+            first = len(request.messages) <= 2
+            text = {"message": self.story if first else "", "done": not first}
+        else:  # tone judge
+            text = {"empathy": 4, "clarity": 5, "language_match": 5, "comment": "ok"}
+        return LLMResponse(text=json.dumps(text), model="rule", usage={"prompt_tokens": 10})
+
+
+@needs_db
+def test_demo_conversation_runs_end_to_end_on_the_model_path(seeded_db: Session) -> None:
+    """Full-mode plumbing: model understanding, model replies + checker, AI customer and judge."""
+    from returns_agent.llm.metering import MeteredClient
+
+    case = CASES["refund-size-upi"]
+    agent = MeteredClient(RuleModel(case.goal.story))  # type: ignore[arg-type]
+    customer = MeteredClient(RuleModel(case.goal.story))  # type: ignore[arg-type]
+    judge = RuleModel(case.goal.story)
+    with open_harness(os.environ["DATABASE_URL"], get_engine(), agent, customer, judge) as h:
+        r = h.run(case, case.variants("llm", demo=True)[0])
+    assert r.passed, r.failures + r.violations
+    assert r.observation.refund_minor == 129900 and r.observation.route == "auto"
+    assert r.agent_usage.calls >= 5 and r.customer_usage.calls >= 1
+    assert r.tone is not None and r.tone.empathy == 4
+    assert r.observation.template_fallbacks == 0  # model replies passed the checker

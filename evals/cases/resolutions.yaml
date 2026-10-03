@@ -3,7 +3,8 @@
 
 - id: refund-size-upi
   title: Size problem, prepaid UPI, wants a refund
-  tags: [refund, prepaid]
+  tags: [refund, prepaid, demo]
+  demo_persona: clear
   order: {sku: KUR-M}
   goal:
     story: The kurta is too tight on the shoulders. I'd like to return it and get my money back.
@@ -43,7 +44,8 @@
 
 - id: exchange-size-kurta
   title: Exchange for a bigger size
-  tags: [exchange]
+  tags: [exchange, demo]
+  demo_persona: hinglish
   order: {sku: KUR-M}
   goal:
     story: The kurta is a bit small for me. Can I exchange it for size L?
@@ -119,7 +121,8 @@
 
 - id: keep-item-serum
   title: Cheap opened cosmetic - refund without return is cheaper than collecting it
-  tags: [keep_item, refund]
+  tags: [keep_item, refund, demo]
+  demo_persona: angry
   order: {sku: SRM-30ml}
   goal:
     story: The serum smells nothing like the description and gave me a rash. I want a refund.
@@ -129,7 +132,8 @@
 
 - id: store-credit-changed-mind
   title: Change of mind, wants store credit
-  tags: [store_credit]
+  tags: [store_credit, demo]
+  demo_persona: changes_mind
   order: {sku: TSH-M}
   goal:
     story: I changed my mind about this t-shirt. Store credit is fine for me.

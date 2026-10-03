@@ -13,7 +13,8 @@
 
 - id: smartwatch-refund-approval
   title: Smartwatch above the auto-approval value limit
-  tags: [approval, high_value]
+  tags: [approval, high_value, demo]
+  demo_persona: clear
   order: {sku: SWT-black}
   goal:
     story: The smartwatch looks nothing like the pictures, the strap and dial are different. I want a refund.
@@ -23,7 +24,8 @@
 
 - id: serial-returner
   title: Six returns in 90 days - escalated to a person
-  tags: [escalate, risk]
+  tags: [escalate, risk, demo]
+  demo_persona: angry
   customer: {prior_returns_90d: 6, prior_orders_90d: 6}
   order: {sku: KUR-M}
   goal:

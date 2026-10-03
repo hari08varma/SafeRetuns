@@ -112,12 +112,20 @@ class EvalCase(_Strict):
     tags: list[str] = Field(default_factory=list)
     modes: list[Mode] = Field(default_factory=lambda: list[Mode](["scripted", "llm"]))
     personas: list[str] = Field(default_factory=lambda: list(PERSONAS))  # llm mode
+    demo_persona: str | None = None  # the one customer style used by `make eval-demo`
     customer: CustomerSetup = Field(default_factory=CustomerSetup)
     order: OrderSetup
     goal: Goal
     world: World = Field(default_factory=World)
     expect: Expect
     max_turns: int = 8
+
+    @field_validator("demo_persona")
+    @classmethod
+    def _known_demo_persona(cls, value: str | None) -> str | None:
+        if value is not None and value not in PERSONAS:
+            raise ValueError(f"unknown demo persona: {value}")
+        return value
 
     @field_validator("personas")
     @classmethod
@@ -127,11 +135,15 @@ class EvalCase(_Strict):
             raise ValueError(f"unknown personas: {sorted(unknown)}")
         return value
 
-    def variants(self, mode: Mode) -> list[str]:
-        """Customer behaviours to run: scripted only without a model."""
+    def variants(self, mode: Mode, demo: bool = False) -> list[str]:
+        """Customer behaviours to run: scripted only without a model; one per case in a demo."""
         if mode not in self.modes:
             return []
-        return [SCRIPTED] if mode == "scripted" else self.personas
+        if mode == "scripted":
+            return [SCRIPTED]
+        if demo:
+            return [self.demo_persona or self.personas[0]]
+        return self.personas
 
 
 def evals_dir() -> Path:

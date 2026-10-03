@@ -3,7 +3,7 @@
 
 - id: rt-photo-from-other-customer
   title: Damage photo already used by another customer
-  tags: [evidence, duplicate_photo, fraud]
+  tags: [evidence, duplicate_photo, fraud, demo]
   personas: [scripted]
   order: {sku: SND-8}
   goal:

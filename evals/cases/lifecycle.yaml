@@ -126,7 +126,8 @@
 
 - id: vague-then-answers
   title: Vague request; answers the agent's question (needs the model to read the answer)
-  tags: [refund, clarify]
+  tags: [refund, clarify, demo]
+  demo_persona: vague
   modes: [llm]
   order: {sku: TSH-M}
   goal:
