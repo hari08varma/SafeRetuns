@@ -92,6 +92,7 @@ def build_handlers(
     def understand_request(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         f = _facts(state)
         request = dict(f.get("request") or {})
+        asked_for_person = bool(request.pop("wants_human", False))  # explicit UI choice
         update: dict[str, Any] = {}
         if llm is not None and f.get("conversation"):
             result = understand(llm, f)
@@ -118,6 +119,8 @@ def build_handlers(
                     f, node.id, {"prompt_refs": result.prompt_refs, "agreement": result.agreement}
                 ),
             }
+        if asked_for_person:
+            update["flags"] = {**(update.get("flags") or {}), "wants_human": True}
         missing = [s for s in REQUIRED_SLOTS if not request.get(s)]
         prompt = f"Could you tell me more about: {', '.join(missing)}?" if missing else None
         return {

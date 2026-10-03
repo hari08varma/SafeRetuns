@@ -15,6 +15,7 @@ from returns_agent.adapters.mock_bundle import mock_adapters
 from returns_agent.api.app import configure_logging, create_app
 from returns_agent.config import get_settings
 from returns_agent.runtime import build_runtime
+from returns_agent.seed import bootstrap
 from returns_agent.workers.run import start_embedded
 
 configure_logging()
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         saver.setup()
         runtime = build_runtime(settings, saver, adapters)
         app.state.cases = runtime.cases
+        bootstrap.run(runtime.cases)  # demo data / first admin, only when configured
         worker = start_embedded(runtime) if settings.embedded_worker else None
         yield
         if worker is not None:
