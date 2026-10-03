@@ -1,6 +1,6 @@
 """Minimal, safe JSONLogic evaluator (no code execution).
 
-Supported operators: var, ==, !=, <, <=, >, >=, and, or, !, !!, in.
+Supported operators: var, ==, !=, <, <=, >, >=, and, or, !, !!, in, +, -.
 Used for graph edge conditions now and policy rules in Phase 2.
 """
 
@@ -13,7 +13,7 @@ class ConditionError(ValueError):
     pass
 
 
-def _var(path: Any, data: dict[str, Any]) -> Any:
+def resolve_var(path: Any, data: dict[str, Any]) -> Any:
     default = None
     if isinstance(path, list):
         path, default = (path + [None])[:2]
@@ -37,7 +37,7 @@ def evaluate(logic: Any, data: dict[str, Any]) -> Any:
         raise ConditionError(f"rule must have exactly one operator: {logic!r}")
     op, raw_args = next(iter(logic.items()))
     if op == "var":
-        return _var(raw_args, data)
+        return resolve_var(raw_args, data)
     args = raw_args if isinstance(raw_args, list) else [raw_args]
 
     if op == "and":
@@ -75,6 +75,12 @@ def evaluate(logic: Any, data: dict[str, Any]) -> Any:
             return values[0] > values[1] if op == ">" else values[0] >= values[1]
         except TypeError:
             return False
+    if op in ("+", "-"):
+        if any(isinstance(v, bool) or not isinstance(v, int | float) for v in values):
+            raise ConditionError(f"'{op}' needs numbers: {values!r}")
+        if op == "+":
+            return sum(values)
+        return -values[0] if len(values) == 1 else values[0] - values[1]
     if op == "in":
         container = values[1]
         return container is not None and values[0] in container

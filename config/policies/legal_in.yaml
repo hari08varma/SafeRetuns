@@ -1,0 +1,16 @@
+# Legal layer — evaluated before merchant policy; merchant rules cannot override it.
+# Changes here need legal review, not just admin approval.
+version: legal-in-2020
+layer: legal
+effective_from: 2020-07-23T00:00:00+05:30
+rules:
+  - clause_id: LEGAL-IN-DEFECT-01
+    text: >-
+      A seller may not refuse to take back goods or refund the price if the goods are
+      defective, deficient or spurious, or not as advertised
+      (Consumer Protection (E-Commerce) Rules, 2020 — duties of sellers).
+    applies_to:
+      in: [{var: request.reason_category}, [damaged, defective, wrong_item, not_as_described]]
+    effects:
+      guarantee_resolutions: [refund, replacement]
+      waive_fees: true

@@ -23,6 +23,9 @@ DATA = {"facts": {"eligible": True, "days": 12, "category": "apparel", "tags": [
         ({"in": ["gift", {"var": "facts.tags"}]}, True),
         ({"in": ["x", {"var": "facts.nope"}]}, False),
         ({"<": [{"var": "facts.nope"}, 5]}, False),  # missing value never passes a comparison
+        ({"-": [{"var": "facts.days"}, 2]}, 10),
+        ({"-": [5]}, -5),
+        ({"+": [1, 2, {"var": "facts.days"}]}, 15),
     ],
 )
 def test_operators(rule: dict[str, object], expected: object) -> None:
@@ -37,3 +40,10 @@ def test_rejects_unknown_operator() -> None:
 def test_rejects_multiple_operators() -> None:
     with pytest.raises(ConditionError):
         evaluate({"==": [1, 1], "!=": [1, 2]}, DATA)
+
+
+def test_arithmetic_rejects_non_numbers() -> None:
+    with pytest.raises(ConditionError):
+        evaluate({"-": [{"var": "facts.nope"}, 1]}, DATA)
+    with pytest.raises(ConditionError):
+        evaluate({"+": [True, 1]}, DATA)

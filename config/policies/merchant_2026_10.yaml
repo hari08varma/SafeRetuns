@@ -1,0 +1,80 @@
+# Merchant return policy. A case is judged by the version in force on the ORDER date.
+version: "2026-10"
+layer: merchant
+effective_from: 2026-01-01T00:00:00+05:30
+return_window_days: 30
+rules:
+  # --- Hard limits (legal protection cannot override these) ---------------------------
+  - clause_id: RET-DELIVERED-01
+    text: Only delivered orders can be returned; undelivered orders can be cancelled instead.
+    require: {"==": [{var: order.status}, delivered]}
+    reason_code: NOT_DELIVERED
+    legal_overridable: false
+
+  - clause_id: RET-QTY-01
+    text: The quantity returned cannot exceed the quantity bought minus earlier returns.
+    require:
+      and:
+        - {">=": [{var: item.qty_returning}, 1]}
+        - {"<=": [{var: item.qty_returning}, {"-": [{var: item.qty_ordered}, {var: item.qty_already_returned}]}]}
+    reason_code: INVALID_QUANTITY
+    legal_overridable: false
+
+  - clause_id: RET-WINDOW-01
+    text: Items can be returned within 30 days of delivery; later issues go through warranty.
+    applies_to: {"!=": [{var: days_since_delivery}, null]}
+    require: {"<=": [{var: days_since_delivery}, {var: return_window_days}]}
+    reason_code: OUTSIDE_WINDOW
+    legal_overridable: false
+
+  # --- Category and sale restrictions (legal protection overrides these) --------------
+  - clause_id: RET-NONRET-01
+    text: Innerwear, perishables and personalised items cannot be returned.
+    applies_to: {in: [{var: item.category}, [innerwear, perishable, customised]]}
+    require: false
+    reason_code: NON_RETURNABLE_CATEGORY
+
+  - clause_id: RET-FINALSALE-01
+    text: Final-sale items cannot be returned.
+    applies_to: {"==": [{var: item.final_sale}, true]}
+    require: false
+    reason_code: FINAL_SALE
+
+  # --- Resolutions, evidence and money ------------------------------------------------
+  - clause_id: RET-REPLACE-01
+    text: Replacement is offered only for damaged, defective or wrong items.
+    applies_to:
+      "!": {in: [{var: request.reason_category}, [damaged, defective, wrong_item]]}
+    effects:
+      allow_resolutions: [refund, exchange, store_credit]
+
+  - clause_id: RET-EVIDENCE-01
+    text: Damaged, defective or wrong-item claims need a photo of the item.
+    applies_to: {in: [{var: request.reason_category}, [damaged, defective, wrong_item]]}
+    effects:
+      require_evidence: [photo]
+
+  - clause_id: RET-CHANGEDMIND-01
+    text: For change-of-mind returns the original shipping fee is not refunded.
+    applies_to: {"==": [{var: request.reason_category}, changed_mind]}
+    effects:
+      shipping_refundable: false
+
+  - clause_id: RET-GIFT-01
+    text: Gift returns are settled by exchange or store credit to the recipient.
+    applies_to: {"==": [{var: request.is_gift}, true]}
+    effects:
+      allow_resolutions: [exchange, store_credit]
+      refund_methods: [store_credit]
+
+  - clause_id: RET-REFUND-PREPAID-01
+    text: Prepaid orders are refunded to the original payment method or as store credit.
+    applies_to: {"!=": [{var: order.payment_method}, cod]}
+    effects:
+      refund_methods: [source, store_credit]
+
+  - clause_id: RET-COD-01
+    text: Cash-on-delivery orders are refunded by bank transfer, UPI or store credit.
+    applies_to: {"==": [{var: order.payment_method}, cod]}
+    effects:
+      refund_methods: [bank_transfer, upi, store_credit]

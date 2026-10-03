@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 60.0
 
     database_url: str = "postgresql://returns:returns@localhost:5432/returns"
+    config_dir: str = ""  # holds policies/ and graphs/; found automatically in the repo
 
     # Security — must be set outside development (see .env.example).
     jwt_secret: str = ""
@@ -31,3 +33,13 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def config_dir() -> Path:
+    configured = get_settings().config_dir
+    if configured:
+        return Path(configured)
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "config" / "policies").is_dir():
+            return parent / "config"
+    raise RuntimeError("config directory not found; set CONFIG_DIR")

@@ -18,10 +18,17 @@ dependencies = [
   "pyjwt>=2.9",
   "cryptography>=43",
   "email-validator>=2.2",
+  "pyyaml>=6",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "hypothesis>=6.100",
+    "types-pyyaml>=6.0.12.20260906",
+]
 
 [tool.ruff]
 line-length = 100
