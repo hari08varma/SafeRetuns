@@ -63,7 +63,8 @@ policy and money. Vapsi does both.
 
 **Customers**
 - Phone sign-in (Firebase Phone Auth) and profile management
-- Natural-language support with clarifying questions for incomplete requests
+- Guided support assistant: chats about the customer's own orders, asks clarifying questions
+  for incomplete requests, then opens the return; "talk to a person" escalates to the team
 - Return requests with reason collection and photo evidence upload
 - Return, replacement, refund and exchange workflows
 - Return-status notifications, automated follow-ups and reminders
@@ -200,6 +201,10 @@ docker compose up -d --build           # Postgres, Redis, MinIO, API (:8000), wo
 docker compose exec api python -m returns_agent.seed.admin --email owner@yourstore.in
 ```
 
+On start-up the API runs migrations and an idempotent bootstrap: it loads the product
+catalogue, creates the first admin when `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`
+are set, and gives every new account four standard demo orders to return.
+
 API docs: <http://localhost:8000/docs>. Health check: <http://localhost:8000/healthz>.
 
 ### Local development
@@ -245,6 +250,7 @@ Backend settings live in `services/.env` (template: [`.env.example`](.env.exampl
 | `FIREBASE_PROJECT_ID` | Verifies customer phone sign-in tokens against Google's keys |
 | `EVIDENCE_DIR` | Storage for uploaded evidence photos |
 | `EMBEDDED_WORKER` | Run the relay inside the API process (single-container hosting) |
+| `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` | Create the first admin at start-up (hosts without a shell) |
 | `DEV_OTP_ECHO` | Development only: show OTPs on screen |
 
 Web settings live in `apps/web/.env.local` (template: [`apps/web/.env.example`](apps/web/.env.example)):
