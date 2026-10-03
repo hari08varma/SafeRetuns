@@ -122,6 +122,7 @@ class CaseRunner:
         spec = self.registry.spec(case.graph_version)
         waiting_for = spec.node(waiting_node).waits_for if waiting_node else None
 
+        llm_trace: dict[str, Any] = values.get("facts", {}).get("llm_trace") or {}
         for i, node in enumerate(path[previous_path:]):
             # The resumed node acted on the human's event; everything after is the agent.
             human = i == 0 and actor[0] != "system"
@@ -131,7 +132,11 @@ class CaseRunner:
                 actor_id=actor[1] if human else None,
                 case_id=case.id,
                 action="graph.node",
-                payload={"node": node, "graph_version": case.graph_version},
+                payload={
+                    "node": node,
+                    "graph_version": case.graph_version,
+                    "llm": llm_trace.get(node),  # prompt versions used by this node
+                },
             )
         for violation in violations[previous_violations:]:
             audit.append(

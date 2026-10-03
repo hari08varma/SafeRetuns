@@ -31,6 +31,13 @@ def get_adapters(request: Request) -> Adapters:
     return adapters
 
 
+def get_cases(request: Request) -> Any:
+    cases = getattr(request.app.state, "cases", None)
+    if cases is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "case service not configured")
+    return cases
+
+
 _bearer = HTTPBearer(auto_error=False)
 
 

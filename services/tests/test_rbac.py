@@ -1,5 +1,7 @@
 """Every protected endpoint declares its roles, and the role matrix is enforced."""
 
+import uuid
+
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -25,6 +27,17 @@ EXPECTED: dict[tuple[str, str], set[Role]] = {
     ("GET", "/api/v1/admin/users"): {Role.ADMIN},
     ("POST", "/api/v1/admin/users"): {Role.ADMIN},
     ("GET", "/api/v1/analytics/summary"): {Role.ANALYST, Role.ADMIN},
+    ("POST", "/api/v1/cases"): {Role.CUSTOMER},
+    ("POST", "/api/v1/cases/{case_id}/messages"): {Role.CUSTOMER},
+    ("POST", "/api/v1/cases/{case_id}/confirm"): {Role.CUSTOMER},
+    ("GET", "/api/v1/cases/{case_id}/messages"): {Role.CUSTOMER},
+}
+
+BODIES = {
+    ("POST", "/api/v1/admin/users"): None,  # filled per role below (unique email)
+    ("POST", "/api/v1/cases"): {"order_id": "ORD-X", "item_id": "ORD-X-1", "message": "hi"},
+    ("POST", "/api/v1/cases/{case_id}/messages"): {"text": "hi"},
+    ("POST", "/api/v1/cases/{case_id}/confirm"): {"accept": True},
 }
 
 
@@ -61,18 +74,18 @@ def test_role_matrix(
     with get_engine().connect() as conn:
         customer_id = conn.execute(select(Customer.id).limit(1)).scalar_one()
     token = issue_token(Principal(str(customer_id), role), "access")
-    body = (
-        {
+    body = BODIES.get((method, path))
+    if path == "/api/v1/admin/users" and method == "POST":
+        body = {
             "email": f"m-{role.value}@saferetuns.dev",
             "password": "a-long-password-1",
             "role": "agent",
         }
-        if method == "POST"
-        else None
-    )
-    resp = client.request(method, path, json=body, headers={"Authorization": f"Bearer {token}"})
+    url = path.replace("{case_id}", str(uuid.uuid4()))
+    resp = client.request(method, url, json=body, headers={"Authorization": f"Bearer {token}"})
     if role in EXPECTED[(method, path)]:
-        assert resp.status_code in (200, 201), resp.text
+        # Authorised: anything but an auth failure (case endpoints may 404/503 here).
+        assert resp.status_code not in (401, 403), resp.text
     else:
         assert resp.status_code == 403
 

@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    llm_provider: Literal["fake", "deepseek"] = "fake"
+    llm_provider: Literal["none", "deepseek"] = "none"  # none = structured input + templates
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     llm_model: str = "deepseek-flash"  # DeepSeek-V4.1-Flash (per api-docs.deepseek.com)
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql://returns:returns@localhost:5432/returns"
     config_dir: str = ""  # holds policies/ and graphs/; found automatically in the repo
+    graph_active_version: str = "returns-v1"
 
     # Security — must be set outside development (see .env.example).
     jwt_secret: str = ""

@@ -4,6 +4,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 
@@ -32,9 +33,10 @@ def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 
 
-def create_app(adapters: Adapters) -> FastAPI:
-    app = FastAPI(title="SafeReturns API", version="0.1.0")
+def create_app(adapters: Adapters, cases: Any = None, lifespan: Any = None) -> FastAPI:
+    app = FastAPI(title="SafeReturns API", version="0.1.0", lifespan=lifespan)
     app.state.adapters = adapters
+    app.state.cases = cases  # CaseService; None until the runner is configured
     app.include_router(router)
 
     @app.middleware("http")

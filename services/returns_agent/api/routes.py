@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,10 +8,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from returns_agent.api.deps import Adapters, get_adapters, require
+from returns_agent.agent.cases import CaseNotFound, CaseService, CaseView
+from returns_agent.api.deps import Adapters, get_adapters, get_cases, require
 from returns_agent.audit import log as audit
 from returns_agent.db.models import Order, ReturnCase, StaffUser
 from returns_agent.db.session import get_session
+from returns_agent.graph.events import InvalidEvent
+from returns_agent.graph.runner import CaseClosed, StaleEvent
 from returns_agent.security.otp import InvalidOtp, OtpRateLimited, request_otp, verify_otp
 from returns_agent.security.tokens import (
     STAFF_ROLES,
@@ -226,3 +230,72 @@ def analytics_summary(
         "orders": db.scalar(select(func.count()).select_from(Order)) or 0,
         "cases": db.scalar(select(func.count()).select_from(ReturnCase)) or 0,
     }
+
+
+# --- Customer cases ------------------------------------------------------------------------
+# The role guard is the first dependency of every endpoint, so unauthorised callers get 403
+# before anything else is resolved.
+
+Cases = Annotated[CaseService, Depends(get_cases)]
+CustomerOnly = Annotated[Principal, require(Role.CUSTOMER)]
+
+
+class OpenCase(BaseModel):
+    order_id: str
+    item_id: str
+    qty: int = Field(default=1, ge=1)
+    message: str = Field(min_length=1, max_length=4000)
+
+
+class CustomerText(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class Confirm(BaseModel):
+    accept: bool
+    option: str | None = None
+
+
+def _case_call(fn: Callable[[], CaseView]) -> CaseView:
+    try:
+        return fn()
+    except CaseNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except (StaleEvent, CaseClosed) as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except InvalidEvent as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+
+
+@router.post("/cases", status_code=status.HTTP_201_CREATED)
+def open_case(principal: CustomerOnly, body: OpenCase, db: DB, cases: Cases) -> CaseView:
+    customer = uuid.UUID(principal.subject)
+    return _case_call(
+        lambda: cases.open(db, customer, body.order_id, body.item_id, body.qty, body.message)
+    )
+
+
+@router.post("/cases/{case_id}/messages")
+def case_message(
+    principal: CustomerOnly, case_id: uuid.UUID, body: CustomerText, db: DB, cases: Cases
+) -> CaseView:
+    customer = uuid.UUID(principal.subject)
+    return _case_call(lambda: cases.message(db, customer, case_id, body.text))
+
+
+@router.post("/cases/{case_id}/confirm")
+def case_confirm(
+    principal: CustomerOnly, case_id: uuid.UUID, body: Confirm, db: DB, cases: Cases
+) -> CaseView:
+    customer = uuid.UUID(principal.subject)
+    return _case_call(lambda: cases.confirm(db, customer, case_id, body.accept, body.option))
+
+
+@router.get("/cases/{case_id}/messages")
+def case_history(
+    principal: CustomerOnly, case_id: uuid.UUID, db: DB, cases: Cases
+) -> list[dict[str, str]]:
+    try:
+        return cases.history(db, uuid.UUID(principal.subject), case_id)
+    except CaseNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc

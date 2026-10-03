@@ -3,7 +3,7 @@ TEST_DB_URL ?= postgresql://returns:returns@localhost:5432/returns_test
 STAFF_PASSWORD ?= change-me-please
 RUN = uv run --directory services
 
-.PHONY: install up down migrate seed-db api lint typecheck test test-all spike-graph spike-llm seed check
+.PHONY: install up down migrate seed-db api lint typecheck test test-all spike-graph spike-llm agent-smoke seed check
 
 install:
 	cd services && uv sync
@@ -40,6 +40,9 @@ spike-graph:
 
 spike-llm:     ## needs DEEPSEEK_API_KEY in services/.env
 	$(RUN) python spikes/llm_spike.py
+
+agent-smoke:   ## live LLM-layer check on DeepSeek (needs DEEPSEEK_API_KEY in services/.env)
+	$(RUN) python spikes/agent_smoke.py
 
 seed:
 	$(RUN) python -m returns_agent.seed.generator --out ../seed.json

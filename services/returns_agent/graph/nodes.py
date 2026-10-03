@@ -1,9 +1,11 @@
 """Node handlers for graph returns-v1.
 
-Real now: AUTHENTICATE, CHECK_ELIGIBILITY (policy engine), GENERATE_OPTIONS (look-ahead +
-refund quote), and the waiting nodes' event handling. Marked STUB nodes get their real
-logic in later phases (LLM: Phase 4, decisions: Phase 5, execution: Phase 6, evidence/
-risk: Phase 8); each stub keeps the state contract those phases will fill in.
+Real: AUTHENTICATE, IDENTIFY_ORDER and UNDERSTAND_REQUEST (LLM when configured),
+CHECK_ELIGIBILITY (policy engine), EXPLAIN_INELIGIBLE (clause texts), GENERATE_OPTIONS
+(look-ahead + refund quote), and the waiting nodes' event handling. Marked STUB nodes get
+their real logic later (decisions: Phase 5, execution: Phase 6, evidence/risk: Phase 8);
+each stub keeps the state contract those phases fill in. Without an LLM, the LLM nodes
+fall back to structured input from the API.
 Handlers never call external systems directly; side effects go through the outbox (Phase 6).
 """
 
@@ -11,10 +13,13 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
+from returns_agent.agent.identify import identify_item
+from returns_agent.agent.understand import MIN_AGREEMENT, understand
 from returns_agent.config import config_dir
 from returns_agent.graph.compiler import CaseState, Handler
 from returns_agent.graph.lookahead import Feasibility, feasible_options
 from returns_agent.graph.schema import GraphSpec, NodeSpec
+from returns_agent.llm.client import LLMClient
 from returns_agent.policy.engine import PolicyFacts, evaluate_policy
 from returns_agent.policy.refund import Payment, RefundLine, compute_refund
 from returns_agent.policy.schema import PolicyDoc, load_policies, select_version
@@ -29,6 +34,12 @@ def _policies() -> tuple[list[PolicyDoc], list[PolicyDoc]]:
     return load_policies(config_dir() / "policies")
 
 
+@lru_cache
+def _clause_texts() -> dict[str, str]:
+    legal, merchant = _policies()
+    return {r.clause_id: r.text for doc in legal + merchant for r in doc.rules}
+
+
 def _facts(state: CaseState) -> dict[str, Any]:
     return state.get("facts") or {}
 
@@ -37,7 +48,13 @@ def _event(state: CaseState) -> dict[str, Any]:
     return state.get("last_event") or {}
 
 
-def build_handlers(spec: GraphSpec, feasibility: Feasibility) -> dict[str, Handler]:
+def _trace(f: dict[str, Any], node: str, entry: dict[str, Any]) -> dict[str, Any]:
+    return {**(f.get("llm_trace") or {}), node: entry}
+
+
+def build_handlers(
+    spec: GraphSpec, feasibility: Feasibility, llm: LLMClient | None = None
+) -> dict[str, Handler]:
     def start(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         return {"counters": {"turns": 1, "clarifications": 0, "evidence_requests": 0}}
 
@@ -47,21 +64,62 @@ def build_handlers(spec: GraphSpec, feasibility: Feasibility) -> dict[str, Handl
         return {"facts": {"authenticated": ok}}
 
     def identify_order(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        return {}  # STUB (Phase 4): match free text to order/item; API supplies them for now
+        f = _facts(state)
+        if f.get("order") or llm is None or not f.get("candidates"):
+            return {}  # the API supplied the order/item, or there is nothing to match
+        item_id, refs = identify_item(llm, f)
+        update: dict[str, Any] = {"llm_trace": _trace(f, node.id, {"prompt_refs": refs})}
+        if item_id is not None:
+            update |= (f.get("candidate_facts") or {}).get(item_id, {})
+        return {"facts": update}
 
     def understand_request(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        # STUB (Phase 4): LLM extraction. Detects missing slots from structured input.
-        request = _facts(state).get("request") or {}
+        f = _facts(state)
+        request = dict(f.get("request") or {})
+        update: dict[str, Any] = {}
+        if llm is not None and f.get("conversation"):
+            result = understand(llm, f)
+            ex = result.extraction
+            confident = result.agreement >= MIN_AGREEMENT
+            for key in ("reason_category", "desired_resolution"):
+                value = getattr(ex, key)
+                if value and confident and not request.get(key):
+                    request[key] = value
+            sku = str((f.get("item") or {}).get("sku", ""))
+            if ex.exchange_variant and "-" in sku:
+                request["exchange_sku"] = f"{sku.rsplit('-', 1)[0]}-{ex.exchange_variant.upper()}"
+            update |= {
+                "language": ex.language,
+                "flags": {
+                    "sentiment": ex.sentiment,
+                    "wants_human": ex.wants_human,
+                    "legal_threat": ex.legal_threat,
+                },
+                "llm_trace": _trace(
+                    f, node.id, {"prompt_refs": result.prompt_refs, "agreement": result.agreement}
+                ),
+            }
         missing = [s for s in REQUIRED_SLOTS if not request.get(s)]
         prompt = f"Could you tell me more about: {', '.join(missing)}?" if missing else None
-        return {"facts": {"missing_slots": missing, "pending_prompt": prompt}}
+        return {
+            "facts": {
+                **update,
+                "request": request,
+                "missing_slots": missing,
+                "pending_prompt": prompt,
+            }
+        }
 
     def clarify(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        answers = _event(state).get("answers") or {}
-        request = {**(_facts(state).get("request") or {}), **answers}
+        e = _event(state)
+        f = _facts(state)
+        request = {**(f.get("request") or {}), **(e.get("answers") or {})}
+        conversation = list(f.get("conversation") or [])
+        if e.get("text"):
+            conversation.append({"role": "customer", "text": e["text"]})
         counters = state.get("counters") or {}
         return {
-            "facts": {"request": request, "pending_prompt": None},
+            "facts": {"request": request, "pending_prompt": None, "conversation": conversation},
             "counters": {
                 "clarifications": counters.get("clarifications", 0) + 1,
                 "turns": counters.get("turns", 0) + 1,
@@ -87,10 +145,16 @@ def build_handlers(spec: GraphSpec, feasibility: Feasibility) -> dict[str, Handl
         return {"facts": update}
 
     def explain_ineligible(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        # STUB (Phase 4): LLM wording. Deterministic explanation from the policy trace.
+        # Structured explanation; the responder words it for the customer.
         policy = _facts(state).get("policy") or {}
+        failed = [t["clause_id"] for t in policy.get("trace", []) if t["result"] == "failed"]
+        texts = _clause_texts()
         return {
-            "facts": {"explanation": policy.get("reason_codes", []), "close_outcome": "rejected"}
+            "facts": {
+                "explanation": policy.get("reason_codes", []),
+                "explanation_texts": [texts[c] for c in failed if c in texts],
+                "close_outcome": "rejected",
+            }
         }
 
     def request_evidence(state: CaseState, node: NodeSpec) -> dict[str, Any]:
@@ -138,7 +202,12 @@ def build_handlers(spec: GraphSpec, feasibility: Feasibility) -> dict[str, Handl
         return {"facts": {"chosen_option": preferred if preferred in options else options[0]}}
 
     def autonomy_gate(state: CaseState, node: NodeSpec) -> dict[str, Any]:
-        return {"facts": {"route": _facts(state).get("route_override") or "auto"}}  # STUB (5)
+        # STUB (Phase 5): risk x value x confidence. Safety flags always escalate.
+        f = _facts(state)
+        flags = f.get("flags") or {}
+        if flags.get("legal_threat") or flags.get("wants_human"):
+            return {"facts": {"route": "escalate"}}
+        return {"facts": {"route": f.get("route_override") or "auto"}}
 
     def human_approval(state: CaseState, node: NodeSpec) -> dict[str, Any]:
         e = _event(state)
