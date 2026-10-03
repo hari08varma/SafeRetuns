@@ -3,7 +3,7 @@ TEST_DB_URL ?= postgresql://returns:returns@localhost:5432/returns_test
 STAFF_PASSWORD ?= change-me-please
 RUN = uv run --directory services
 
-.PHONY: install up down migrate seed-db api lint typecheck test test-all spike-graph spike-llm agent-smoke worker seed check
+.PHONY: install up down migrate seed-db api lint typecheck test test-all spike-graph spike-llm agent-smoke worker eval-smoke eval-full seed check
 
 install:
 	cd services && uv sync
@@ -46,6 +46,14 @@ spike-llm:     ## needs DEEPSEEK_API_KEY in services/.env
 
 agent-smoke:   ## live LLM-layer check on DeepSeek (needs DEEPSEEK_API_KEY in services/.env)
 	$(RUN) python spikes/agent_smoke.py
+
+eval-smoke:    ## eval suite without a model (scripted customers); report in evals/reports
+	DATABASE_URL=$(TEST_DB_URL) $(RUN) alembic upgrade head
+	DATABASE_URL=$(TEST_DB_URL) $(RUN) python -m returns_agent.evals.run --mode smoke --strict --check-bars
+
+eval-full:     ## DeepSeek agent + LLM customers, 4 trials (needs LLM_PROVIDER=deepseek + key in services/.env)
+	DATABASE_URL=$(TEST_DB_URL) $(RUN) alembic upgrade head
+	DATABASE_URL=$(TEST_DB_URL) $(RUN) python -m returns_agent.evals.run --mode full --check-bars
 
 seed:
 	$(RUN) python -m returns_agent.seed.generator --out ../seed.json

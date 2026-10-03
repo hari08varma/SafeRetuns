@@ -1,3 +1,5 @@
+import secrets
+
 from returns_agent.adapters.bundle import Adapters
 from returns_agent.adapters.mock import (
     MockCarrierAdapter,
@@ -15,7 +17,9 @@ def mock_adapters() -> Adapters:
     seed = generate()
     return Adapters(
         orders=MockOrderAdapter(seed),
-        carrier=MockCarrierAdapter(),
+        carrier=MockCarrierAdapter(
+            awb_prefix=f"AWB{secrets.token_hex(2).upper()}-"
+        ),  # unique per run
         payment=MockPaymentAdapter(),
         inventory=MockInventoryAdapter({p.sku: 20 for p in seed.products}),
         notification=MockNotificationAdapter(),

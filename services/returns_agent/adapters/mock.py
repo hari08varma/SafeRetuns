@@ -90,10 +90,14 @@ class MockOrderAdapter:
 
 class MockCarrierAdapter:
     def __init__(
-        self, unserviceable: set[str] | None = None, faults: FaultPlan | None = None
+        self,
+        unserviceable: set[str] | None = None,
+        faults: FaultPlan | None = None,
+        awb_prefix: str = "AWB",  # make AWBs unique when several processes share a database
     ) -> None:
         self.faults = faults or FaultPlan()
         self.unserviceable = unserviceable or set()
+        self.awb_prefix = awb_prefix
         self._bookings: dict[str, PickupBooking] = {}
         self.events: dict[str, list[str]] = {}
 
@@ -107,7 +111,9 @@ class MockCarrierAdapter:
         self.faults.apply("carrier.schedule_pickup")
         if pincode in self.unserviceable:
             raise AdapterError(f"pincode {pincode} not serviceable")
-        booking = PickupBooking(awb=f"AWB{len(self._bookings) + 1:08d}", slot="next-day 10-14")
+        booking = PickupBooking(
+            awb=f"{self.awb_prefix}{len(self._bookings) + 1:08d}", slot="next-day 10-14"
+        )
         self._bookings[idempotency_key] = booking
         self.events[booking.awb] = ["pickup_scheduled"]
         return booking

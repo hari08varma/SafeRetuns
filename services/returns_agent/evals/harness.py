@@ -130,6 +130,8 @@ class Harness:
         self.customer_llm = customer_llm
         self.judge_llm = judge_llm
         self.run_token = secrets.token_hex(3)
+        if isinstance(adapters.carrier, MockCarrierAdapter):
+            adapters.carrier.awb_prefix = f"AWB{self.run_token.upper()}-"
         self._ids = count(1)
         self._stock = {p.sku: 20 for p in generate(seed=1, customers=1).products}
         system = (config_dir() / "prompts" / "system.md").read_text().splitlines()
@@ -216,6 +218,7 @@ class Harness:
         for _ in range(MAX_STEPS):
             status, node, waiting = self._state(case_id)
             if status == "closed" or waiting in STOP_WAITS:
+                self._settle(case_id)  # queued side effects (compensation, notices) still run
                 return case_id, None
             if waiting == "customer_message":
                 if turns >= case.max_turns:
@@ -268,8 +271,13 @@ class Harness:
             return case.status, case.current_node, spec.node(case.current_node).waits_for
 
     def _drain(self, case_id: uuid.UUID) -> bool:
-        """Run the worker until the case's actions finish, skipping retry back-off waits."""
+        """Run the worker until the case's actions finish; True if the case moved on."""
         before = self._state(case_id)
+        self._settle(case_id)
+        return self._state(case_id) != before
+
+    def _settle(self, case_id: uuid.UUID) -> None:
+        """Run the worker until nothing is queued for the case, skipping back-off waits."""
         now = datetime.now(UTC)
         for _ in range(10):
             self.relay.drain(now)
@@ -282,7 +290,6 @@ class Harness:
             if not pending:
                 break
             now += timedelta(hours=1)
-        return self._state(case_id) != before
 
     def _carrier(self, case_id: uuid.UUID, event: str) -> None:
         with self.sessions() as session:

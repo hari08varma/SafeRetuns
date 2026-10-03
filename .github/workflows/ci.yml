@@ -31,3 +31,16 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest -q
+      - name: Eval suite (smoke, no model)
+        env:
+          JWT_SECRET: ci-eval-secret-not-used-anywhere-else-000000
+          PII_INDEX_KEY: ci-eval-index
+        run: |
+          export PII_ENCRYPTION_KEY=$(uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          uv run alembic upgrade head
+          uv run python -m returns_agent.evals.run --mode smoke --strict --check-bars --out eval-reports
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: services/eval-reports/

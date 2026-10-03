@@ -45,7 +45,8 @@ def compute_metrics(
         "variants": len({(r.case_id, r.persona) for r in results}),
         "passed": sum(r.passed for r in results),
         "pass_1": pass_hat_k(results, 1),
-        f"pass_{k}": pass_hat_k(results, k) if k > 1 else None,
+        "k": k,
+        "pass_k": pass_hat_k(results, k) if k > 1 else None,  # plan bar uses k = 4
         "policy_violations": sum(violations.values()),
         "violations_by_type": dict(violations),
         "pii_leaks": violations["pii_leak"] + violations["pii_in_logs"],
@@ -109,10 +110,10 @@ def release_bars(metrics: dict[str, Any], trials: int) -> list[dict[str, Any]]:
         ),
         bar("pass^1", ">= 0.90", metrics["pass_1"], at_least(metrics["pass_1"], 0.90)),
         bar(
-            f"pass^{k}",
-            ">= 0.80" if k == 4 else "(k=4: >= 0.80)",
-            metrics.get(f"pass_{k}"),
-            at_least(metrics.get(f"pass_{k}"), 0.80) if k > 1 else None,
+            f"pass^{k}" if k > 1 else "pass^4",
+            ">= 0.80 (k=4)",
+            metrics["pass_k"],
+            at_least(metrics["pass_k"], 0.80) if k > 1 else None,
         ),
         bar(
             "Correct route",
@@ -175,12 +176,20 @@ def build_report(
     }
 
 
-def _fmt(value: Any) -> str:
+RATIOS = {"pass_1", "pass_k", "route_accuracy", "refund_exactness"}
+RATIO_BARS = {"Refund amount exactness", "Correct route"}
+
+
+def _ratio_bar(name: str) -> bool:
+    return name in RATIO_BARS or name.startswith("pass^")
+
+
+def _fmt(value: Any, ratio: bool = False) -> str:
     if value is None:
         return "n/a"
-    if isinstance(value, float):
-        return f"{value:.2%}" if value <= 1 else f"{value:.2f}"
-    return str(value)
+    if ratio:
+        return f"{value:.1%}"
+    return f"{value:.2f}" if isinstance(value, float) else str(value)
 
 
 def render_markdown(report: dict[str, Any], previous: dict[str, Any] | None) -> str:
@@ -199,13 +208,15 @@ def render_markdown(report: dict[str, Any], previous: dict[str, Any] | None) -> 
         "|---|---|---|---|",
     ]
     lines += [
-        f"| {b['name']} | {b['target']} | {_fmt(b['value'])} | {mark[b['ok']]} |"
+        f"| {b['name']} | {b['target']} | {_fmt(b['value'], _ratio_bar(b['name']))} | "
+        f"{mark[b['ok']]} |"
         for b in report["bars"]
     ]
     lines += ["", "## Metrics", "", "| Metric | Value | Previous |", "|---|---|---|"]
     keys = [
         "passed",
         "pass_1",
+        "pass_k",
         "policy_violations",
         "pii_leaks",
         "route_accuracy",
@@ -220,7 +231,9 @@ def render_markdown(report: dict[str, Any], previous: dict[str, Any] | None) -> 
         "agent_llm_ms_per_case",
     ]
     prev = (previous or {}).get("metrics", {})
-    lines += [f"| {k} | {_fmt(m.get(k))} | {_fmt(prev.get(k))} |" for k in keys]
+    lines += [
+        f"| {k} | {_fmt(m.get(k), k in RATIOS)} | {_fmt(prev.get(k), k in RATIOS)} |" for k in keys
+    ]
     if m["violations_by_type"]:
         lines += [
             "",
@@ -234,7 +247,9 @@ def render_markdown(report: dict[str, Any], previous: dict[str, Any] | None) -> 
             + ", ".join(f"{k} {v}" for k, v in m["tone"].items()),
         ]
     lines += ["", "## Pass rate by tag", "", "| Tag | Runs | pass^1 |", "|---|---|---|"]
-    lines += [f"| {t} | {v['trials']} | {_fmt(v['pass_1'])} |" for t, v in report["by_tag"].items()]
+    lines += [
+        f"| {t} | {v['trials']} | {_fmt(v['pass_1'], True)} |" for t, v in report["by_tag"].items()
+    ]
     lines += ["", f"## Failures ({len(report['failures'])})", ""]
     if not report["failures"]:
         lines.append("None.")
@@ -250,20 +265,26 @@ def write_report(report: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     history = out_dir / "history.jsonl"
     previous = None
+    key = (report["mode"], report.get("selection"))  # compare like with like
     if history.exists():
-        same_mode = [
-            json.loads(line)
-            for line in history.read_text().splitlines()
-            if line.strip() and json.loads(line).get("mode") == report["mode"]
-        ]
-        previous = same_mode[-1] if same_mode else None
+        runs = [json.loads(line) for line in history.read_text().splitlines() if line.strip()]
+        same = [h for h in runs if (h["mode"], h.get("selection")) == key]
+        previous = same[-1] if same else None
     json_path = out_dir / f"{report['run_id']}.json"
     md_path = out_dir / f"{report['run_id']}.md"
     json_path.write_text(json.dumps(report, indent=2, default=str))
     md_path.write_text(render_markdown(report, previous))
     summary = {
-        k: report[k]
-        for k in ("run_id", "mode", "trials", "graph_version", "decision_version", "commit")
+        k: report.get(k)
+        for k in (
+            "run_id",
+            "mode",
+            "selection",
+            "trials",
+            "graph_version",
+            "decision_version",
+            "commit",
+        )
     }
     summary["metrics"] = {k: v for k, v in report["metrics"].items() if not isinstance(v, dict)}
     with history.open("a") as fh:

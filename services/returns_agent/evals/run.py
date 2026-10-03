@@ -130,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         "graph_version": settings.graph_active_version,
         "decision_version": load_decision_config(config_dir() / "decision.yaml").version,
         "commit": _commit(),
+        "selection": f"suite={args.suite} tags={sorted(args.tag)} cases={sorted(args.case)}",
     }
     expected = {c.id: c.expect.model_dump() for c in cases}
     report = build_report(run, results, expected)

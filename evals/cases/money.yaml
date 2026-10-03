@@ -23,7 +23,7 @@
   expect: {outcome: resolved, resolution: refund, route: auto, refund_minor: 49900}  # (179700 - 30000) / 3
 
 - id: partial-two-of-three
-  title: Returns 2 of 3 (rounding down in the customer's disfavour is not allowed to exceed paid)
+  title: Returns 2 of 3 - cumulative-floor split of the coupon-adjusted line
   tags: [refund, partial, coupon]
   order: {sku: TSH-L, qty: 3, discount_minor: 10000}
   goal:
