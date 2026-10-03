@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: returns
+          POSTGRES_PASSWORD: returns
+          POSTGRES_DB: returns
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U returns" --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://returns:returns@localhost:5432/returns
+    defaults:
+      run:
+        working-directory: services
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -q
