@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, selectinload
 from returns_agent.agent import support
 from returns_agent.agent.cases import CaseNotFound, CaseService, CaseView, ReviewNotAvailable
 from returns_agent.agent.support import SupportReply
+from returns_agent.analytics import knowledge
 from returns_agent.analytics import summary as analytics
 from returns_agent.api.deps import Adapters, get_adapters, get_cases, require
 from returns_agent.audit import log as audit
@@ -425,6 +426,12 @@ def create_staff(
     )
     db.commit()
     return _out(user)
+
+
+@router.get("/public/knowledge-graph")
+def public_knowledge_graph(db: DB) -> dict[str, Any]:
+    """Public, anonymised: recent cases with their steps, decisions and reasons."""
+    return knowledge.knowledge_graph(db)
 
 
 @router.get("/analytics/summary")

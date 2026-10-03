@@ -20,6 +20,7 @@ PUBLIC = {
     "/api/v1/auth/otp/verify",
     "/api/v1/auth/staff/login",
     "/api/v1/auth/refresh",
+    "/api/v1/public/knowledge-graph",  # anonymised decision graph, by design
     # authenticated by HMAC signature instead of a bearer token:
     "/api/v1/webhooks/carrier",
     "/api/v1/webhooks/payment",
@@ -42,7 +43,6 @@ EXPECTED: dict[tuple[str, str], set[Role]] = {
     ("POST", "/api/v1/console/cases/{case_id}/qc"): {Role.QC_OPERATOR, Role.ADMIN},
     ("POST", "/api/v1/cases/{case_id}/evidence"): {Role.CUSTOMER},
     ("POST", "/api/v1/cases/{case_id}/review"): {Role.CUSTOMER},
-    ("POST", "/api/v1/support/chat"): {Role.CUSTOMER},
     ("POST", "/api/v1/support/chat"): {Role.CUSTOMER},
     ("GET", "/api/v1/cases"): {Role.CUSTOMER},
     ("GET", "/api/v1/cases/{case_id}"): {Role.CUSTOMER},
@@ -79,7 +79,6 @@ BODIES = {
     ("POST", "/api/v1/cases/{case_id}/confirm"): {"accept": True},
     ("POST", "/api/v1/console/cases/{case_id}/qc"): {"passed": True},
     ("POST", "/api/v1/cases/{case_id}/review"): {"reason": "please check"},
-    ("POST", "/api/v1/support/chat"): {"messages": [{"role": "customer", "text": "hi"}]},
     ("POST", "/api/v1/support/chat"): {"messages": [{"role": "customer", "text": "hi"}]},
     ("POST", "/api/v1/console/queue-items/{item_id}/close"): {
         "outcome": "upheld",
