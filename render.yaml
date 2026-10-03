@@ -31,9 +31,13 @@ services:
         sync: false
       - key: FIREBASE_PROJECT_ID
         sync: false
-      - key: LLM_PROVIDER # "deepseek" to enable the model
-        value: none
+      - key: LLM_PROVIDER # the agent and support assistant run on DeepSeek
+        value: deepseek
       - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: BOOTSTRAP_ADMIN_EMAIL # first admin, created at start-up (no shell on free plan)
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD # 12+ characters
         sync: false
       - key: DEV_OTP_ECHO # never true in a public deployment
         value: "false"

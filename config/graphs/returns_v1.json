@@ -204,6 +204,20 @@
     },
     {
       "from": "UNDERSTAND_REQUEST",
+      "to": "ESCALATE",
+      "priority": 100,
+      "condition": {
+        "==": [
+          {
+            "var": "facts.flags.wants_human"
+          },
+          true
+        ]
+      },
+      "guidance": "The customer asked for a person: hand over with the full context, do not try to resolve first."
+    },
+    {
+      "from": "UNDERSTAND_REQUEST",
       "to": "CLARIFY",
       "priority": 10,
       "condition": {

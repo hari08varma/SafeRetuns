@@ -20,7 +20,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from returns_agent.agent import support
 from returns_agent.agent.cases import CaseNotFound, CaseService, CaseView, ReviewNotAvailable
+from returns_agent.agent.support import SupportReply
 from returns_agent.analytics import summary as analytics
 from returns_agent.api.deps import Adapters, get_adapters, get_cases, require
 from returns_agent.audit import log as audit
@@ -68,6 +70,7 @@ from returns_agent.security.tokens import (
     issue_token,
     verify_password,
 )
+from returns_agent.seed import customer_orders
 
 DB = Annotated[Session, Depends(get_session)]
 router = APIRouter(prefix="/api/v1")
@@ -167,6 +170,7 @@ def firebase_login(body: FirebaseLogin, db: DB) -> CustomerSession:
         )
         db.add(customer)
         db.flush()
+        customer_orders.give_orders(db, customer)  # the four standard orders for a new account
         action = "signup.firebase"
     audit.append(db, actor_type="customer", actor_id=str(customer.id), action=action)
     complete = _profile_complete(db, customer)
@@ -506,6 +510,32 @@ def open_case(principal: CustomerOnly, body: OpenCase, db: DB, cases: Cases) -> 
             },
         )
     )
+
+
+class ChatTurn(BaseModel):
+    role: Literal["customer", "assistant"]
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class SupportChat(BaseModel):
+    messages: list[ChatTurn] = Field(min_length=1, max_length=40)
+
+
+@router.post("/support/chat")
+def support_chat(principal: CustomerOnly, body: SupportChat, db: DB, cases: Cases) -> SupportReply:
+    """The support assistant (model-driven) until it has enough to open a return."""
+    if body.messages[-1].role != "customer":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "last message must be the customer's"
+        )
+    try:
+        return support.chat(
+            db, cases, uuid.UUID(principal.subject), [m.model_dump() for m in body.messages]
+        )
+    except support.AssistantUnavailable as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except (StaleEvent, CaseClosed) as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
 class MyCase(BaseModel):

@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         saver.setup()
         runtime = build_runtime(settings, saver, adapters)
         app.state.cases = runtime.cases
-        bootstrap.run(runtime.cases)  # demo data / first admin, only when configured
+        bootstrap.run()  # catalogue, first admin, standard orders for every account
         worker = start_embedded(runtime) if settings.embedded_worker else None
         yield
         if worker is not None:

@@ -104,9 +104,8 @@ export default function Orders() {
     api<{ name: string }>("customer", "/me/profile").then((p) => setName(p.name)).catch(() => {});
   }, []);
 
-  const delivered = (orders ?? []).filter((o) => o.delivered_at);
-  const botItems: BotItem[] = delivered.flatMap((o) => o.items.filter((i) => !i.final_sale)
-    .map((i) => ({ orderId: o.order_id, itemId: i.item_id, sku: i.sku, title: i.title })));
+  const botItems: BotItem[] = (orders ?? []).filter((o) => o.delivered_at).flatMap((o) => o.items
+    .filter((i) => !i.final_sale).map((i) => ({ orderId: o.order_id, itemId: i.item_id, sku: i.sku, title: i.title })));
   const active = cases.filter((c) => c.status !== "closed");
   const openFor = (o: Order, i: Item) => active.find((c) => c.order_id === o.order_id && c.sku === i.sku);
   const itemCount = (orders ?? []).reduce((n, o) => n + o.items.reduce((k, i) => k + i.qty, 0), 0);
@@ -221,7 +220,7 @@ export default function Orders() {
           </ul>
         </section>
       ))}
-      {orders && <SupportBot items={botItems} name={name} />}
+      {orders && <SupportBot name={name} items={botItems} />}
     </>
   );
 }

@@ -30,9 +30,10 @@ export function Logo() {
 }
 
 /** Links depend on who is signed in on this device: customers see their orders, staff see the
- *  console; signed-out visitors only see the two sign-in entry points. */
+ *  console. The landing page shows only the brand (and Sign in for signed-out visitors). */
 export function Header() {
   const path = usePathname() || "/";
+  const landing = path === "/"; // the landing page shows no account links
   const [who, setWho] = useState<{ customer: boolean; staff: boolean } | null>(null);
 
   useEffect(() => {
@@ -58,18 +59,13 @@ export function Header() {
         Vapsi
       </Link>
       <nav aria-label="Main">
-        {who?.customer && CUSTOMER.map(link)}
-        {who?.customer && who.staff && <span className="nav-sep" aria-hidden="true" />}
-        {who?.staff && TEAM.map(link)}
+        {!landing && who?.customer && CUSTOMER.map(link)}
+        {!landing && who?.customer && who.staff && <span className="nav-sep" aria-hidden="true" />}
+        {!landing && who?.staff && TEAM.map(link)}
       </nav>
-      {who && !(who.customer && who.staff) && (
+      {who && !who.customer && !who.staff && path !== "/login" && (
         <div className="nav-actions">
-          {!who.staff && (
-            <Link href="/console/login" className="nav-ghost">Staff sign in</Link>
-          )}
-          {!who.customer && (
-            <Link href="/login" className="nav-cta">Sign in</Link>
-          )}
+          <Link href="/login" className="nav-cta">Sign in</Link>
         </div>
       )}
     </header>

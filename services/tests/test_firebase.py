@@ -84,7 +84,9 @@ def test_sign_up_then_profile_then_sign_in(
     }
     saved = client.put("/api/v1/me/profile", json=profile, headers=auth)
     assert saved.status_code == 200 and saved.json()["profile_complete"] is True
-    assert client.get("/api/v1/me/orders", headers=auth).json() == []
+    orders = client.get("/api/v1/me/orders", headers=auth).json()
+    assert len(orders) == 4  # every new account gets the four standard orders
+    assert all(o["status"] == "delivered" for o in orders)
 
     again = client.post("/api/v1/auth/firebase", json={"id_token": token()})
     assert again.json()["profile_complete"] is True  # same phone: same account, no duplicate
