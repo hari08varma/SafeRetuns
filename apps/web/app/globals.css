@@ -99,6 +99,14 @@ header.top nav a {
 header.top nav a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
 header.top nav a[aria-current="page"] { color: var(--text); background: var(--surface-2); }
 .nav-sep { width: 1px; height: 20px; background: var(--line); margin: 0 8px; flex: none; }
+.nav-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.nav-ghost { padding: 7px 12px; border-radius: 999px; color: var(--muted); font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
+.nav-ghost:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
+.nav-cta {
+  padding: 8px 16px; border-radius: 999px; background: var(--ink); color: var(--surface);
+  font-weight: 700; font-size: 0.9rem; white-space: nowrap;
+}
+.nav-cta:hover { background: var(--ink-hover); text-decoration: none; }
 
 /* ---------- Layout ---------- */
 main { width: 100%; max-width: 1160px; margin: 0 auto; padding: 32px 20px 80px; flex: 1; }
@@ -303,5 +311,7 @@ pre {
   .bubble { max-width: 90%; }
   header.top { gap: 12px; }
   .nav-sep { display: none; }
+  .nav-actions .nav-ghost { display: none; }
+  .nav-cta { padding: 7px 14px; }
   .bar-row { grid-template-columns: minmax(90px, 35%) 1fr 56px; gap: 8px; }
 }

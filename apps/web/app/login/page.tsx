@@ -4,7 +4,7 @@ import type { ConfirmationResult } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ApiError, post, saveTokens } from "../../lib/api";
-import { confirmCode, firebaseEnabled, sendCode } from "../../lib/firebase";
+import { confirmCode, firebaseEnabled, sendCode, sendErrorMessage } from "../../lib/firebase";
 
 type Session = { access_token: string; refresh_token: string; profile_complete?: boolean };
 
@@ -45,7 +45,8 @@ export default function CustomerLogin() {
       }
       setSent(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not send the code. Check the number and try again.");
+      setError(err instanceof ApiError ? err.message
+        : sendErrorMessage(err) ?? "Could not send the code. Check the number and try again.");
     } finally {
       setBusy(false);
     }

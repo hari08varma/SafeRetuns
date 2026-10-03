@@ -2,12 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { signedIn } from "../lib/api";
 
-const CUSTOMER = [
+type NavLink = { href: string; label: string };
+
+const CUSTOMER: NavLink[] = [
   { href: "/orders", label: "My orders" },
   { href: "/profile", label: "My details" },
 ];
-const TEAM = [
+const TEAM: NavLink[] = [
   { href: "/console", label: "Support console" },
   { href: "/analytics", label: "Analytics" },
   { href: "/admin", label: "Admin" },
@@ -25,9 +29,20 @@ export function Logo() {
   );
 }
 
+/** Links depend on who is signed in on this device: customers see their orders, staff see the
+ *  console; signed-out visitors only see the two sign-in entry points. */
 export function Header() {
   const path = usePathname() || "/";
-  const link = (l: { href: string; label: string }) => {
+  const [who, setWho] = useState<{ customer: boolean; staff: boolean } | null>(null);
+
+  useEffect(() => {
+    const read = () => setWho({ customer: signedIn("customer"), staff: signedIn("staff") });
+    read();
+    window.addEventListener("storage", read);
+    return () => window.removeEventListener("storage", read);
+  }, [path]);
+
+  const link = (l: NavLink) => {
     const active = path === l.href || path.startsWith(l.href + "/");
     return (
       <Link key={l.href} href={l.href} aria-current={active ? "page" : undefined}>
@@ -35,6 +50,7 @@ export function Header() {
       </Link>
     );
   };
+
   return (
     <header className="top">
       <Link href="/" className="brand">
@@ -42,10 +58,20 @@ export function Header() {
         Vapsi
       </Link>
       <nav aria-label="Main">
-        {CUSTOMER.map(link)}
-        <span className="nav-sep" aria-hidden="true" />
-        {TEAM.map(link)}
+        {who?.customer && CUSTOMER.map(link)}
+        {who?.customer && who.staff && <span className="nav-sep" aria-hidden="true" />}
+        {who?.staff && TEAM.map(link)}
       </nav>
+      {who && !(who.customer && who.staff) && (
+        <div className="nav-actions">
+          {!who.staff && (
+            <Link href="/console/login" className="nav-ghost">Staff sign in</Link>
+          )}
+          {!who.customer && (
+            <Link href="/login" className="nav-cta">Sign in</Link>
+          )}
+        </div>
+      )}
     </header>
   );
 }
